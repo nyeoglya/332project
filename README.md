@@ -14,7 +14,7 @@
 ## Plan
 **Week 1: Planning** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week1_report.html)
 
-**Week 2 (Midterm week): Design ideas**
+**Week 2 (Midterm week): Design ideas** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week2_report.html)
 
 **Week 3: Overall project design**
 
