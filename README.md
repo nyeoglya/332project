@@ -14,7 +14,7 @@
 ## Plan
 **Week 1: Planning** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week1_report.html)
 
-**Week 2 (Midterm week): Design ideas** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week2_report.html)
+**Week 2 (Midterm week): Design ideas** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week2_report.html) / [Discussion1](https://github.com/nyeoglya/332project/discussions/3) [Discussion2](https://github.com/nyeoglya/332project/discussions/4) / [Test Code](https://github.com/nyeoglya/grpc-master-worker)
 
 **Week 3: Overall project design**
 
