@@ -7,7 +7,8 @@ lazy val commonDependencies = Seq(
   "dev.zio" %% "zio" % "2.1.11",
   "dev.zio" %% "zio-streams" % "2.1.11",
   "junit" % "junit" % "4.10" % Test,
-  "org.scalatest" %% "scalatest" % "3.0.8" % Test
+  "org.scalatest" %% "scalatest" % "3.0.8" % Test,
+  "org.rogach" %% "scallop" % "5.1.0"
 )
 
 lazy val workerDependencies = Seq(

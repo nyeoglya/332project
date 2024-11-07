@@ -1,7 +1,13 @@
 package master
 
-object Main extends App {
-  println("This is Master")
+import org.rogach.scallop._
 
-  def dummyFunction(elem: List[Int]): List[Int] = elem.filter(_ < 5)
+class Config(args: Seq[String]) extends ScallopConf(args) {
+  val workerNum = trailArg[Int](required = true, descr = "Number of workers")
+  verify()
+}
+
+object Main extends App {
+  val config = new Config(args)
+  println(s"Number of Workers: ${config.workerNum()}")
 }
