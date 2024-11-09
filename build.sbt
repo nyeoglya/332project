@@ -11,11 +11,16 @@ PB.targets in Compile := Seq(
 lazy val commonDependencies = Seq(
   "dev.zio" %% "zio" % "2.1.11",
   "dev.zio" %% "zio-streams" % "2.1.11",
+  "org.rogach" %% "scallop" % "5.1.0",
   "junit" % "junit" % "4.10" % Test,
   "org.scalatest" %% "scalatest" % "3.0.8" % Test,
   "org.rogach" %% "scallop" % "5.1.0",
   "io.grpc" % "grpc-netty" % "1.39.0",
-  "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion
+  "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion,
+  "dev.zio" %% "zio-test" % "2.1.11" % Test,
+  "dev.zio" %% "zio-test-sbt" % "2.1.1" % Test,
+  "dev.zio" %% "zio-test-junit" % "2.1.11" % Test,
+  "com.github.sbt" % "junit-interface" % "0.13.3" % Test
 )
 
 lazy val workerDependencies = Seq(
