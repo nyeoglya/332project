@@ -9,20 +9,21 @@ import Main._
 import common._
 import java.io.{File, PrintWriter}
 import scala.io.Source
+import zio._
+import zio.stream._
+import java.nio.file.Paths
 
 @RunWith(classOf[JUnitRunner])
 class WorkerSuite extends FunSuite {
 
   def readFile(filePath : String) : List[Entity] = {
-    val source = Source.fromFile(filePath)
+    val source = Source.fromFile("src/test/scala/" + filePath)
     val lines = source.getLines().toList
     source.close()
     for {
       line <- lines
-      words <- line.split("|")
-      head = words[0]
-      body = words[1]
-    } yield Entity(head, body)
+      words = line.split("\\|")
+    } yield Entity(words(0), words(1))
   }
 
   def writeFile(filePath : String, data : List[Entity]) : Unit = {
@@ -35,6 +36,18 @@ class WorkerSuite extends FunSuite {
       writer.write("\n")
     })
     writer.close()
+  }
+
+  def isDataSorted(data : List[Entity]) : Boolean = {
+    def isDataSortedAux(data : List[Entity], prev : String) : Boolean = {
+      data match {
+        case Nil => true
+        case e::nextData =>
+          if(e.head > prev) isDataSortedAux(nextData, e.head)
+          else false
+      }
+    }
+    isDataSortedAux(data, "00")
   }
 
   val worker1data : List[List[Entity]] =
@@ -52,8 +65,10 @@ class WorkerSuite extends FunSuite {
 
   val sortedFilePaths =
     List(sortSmallFile("testFile1.txt"), sortSmallFile("testFile2.txt"), sortSmallFile("testFile3.txt"), sortSmallFile("testFile4.txt"))
+
   val sortedFileDatas =
     sortedFilePaths.map(path => readFile(path))
+
   val sampledFilePaths =
     sortedFilePaths.map(path => produceSampleFile(path, offset))
   val sampledFileDatas =
@@ -61,7 +76,7 @@ class WorkerSuite extends FunSuite {
   val w1SampleStream = sampleFilesToSampleStream(sampledFilePaths.take(M))
   val w2SampleStream = sampleFilesToSampleStream(sampledFilePaths.drop(M))
   val partitionStreams =
-    sortedFilePaths.map(path => splitFileIntoPartitionStreams(path))
+    sortedFilePaths.map(path => splitFileIntoPartitionStreams(path, N))
   val w1Tow1 =
     mergeBeforeShuffle(List(partitionStreams(0)(0), partitionStreams(1)(0)))
   val w1Tow2 =
@@ -79,23 +94,23 @@ class WorkerSuite extends FunSuite {
   }
 
   test("sortSmallFile test : sorted correctly ") {
-    assert(true)
+    assert(sortedFileDatas.forall(entitys => isDataSorted(entitys)))
   }
 
   test("produceSampleFile test : subset ") {
-    assert(sampledFileDatas.tail.forall(entity => sortedFileDatas.tail.contains(entity)))
+    assert(sampledFileDatas.last.forall(entity => sortedFileDatas.last.contains(entity)))
   }
 
   test("produceSampleFile test : sorted ") {
-    assert(true)
+    assert(sampledFileDatas.forall(entitys => isDataSorted(entitys)))
   }
 
   test("produceSampleFile test : length ") {
-    assert(sampledFileDatas.tail.length == sortedFileDatas.tail.length / offset)
+    assert(sampledFileDatas.last.length == sortedFileDatas.last.length / offset)
   }
 
   test("sampleFilesToSampleStream test : length ") {
-    assert(w1SampleStream.runCount == sampledFileDatas(0).length + sampledFileDatas(1).length)
+    assert(w1SampleStream.length == sampledFileDatas(0).length + sampledFileDatas(1).length)
   }
 
   test("splitFileIntoPartitionStreams test : N stream ") {
@@ -103,23 +118,37 @@ class WorkerSuite extends FunSuite {
   }
 
   test("splitFileIntoPartitionStreams test : length ") {
-    assert(partitionStreams.head.map(st => st.runCount).sum == sortedFileDatas.head.length)
+    val partitionedLenSum = Unsafe.unsafe { implicit unsafe =>
+      partitionStreams.head.map(st => Runtime.default.unsafe.run(st.runCount).getOrThrow()).sum
+    }
+    assert(partitionedLenSum == sortedFileDatas.head.length)
   }
 
   test("splitFileIntoPartitionStreams test : sort ") {
-    assert(true)
-  }
-
-  test("mergeBeforeShuffle test : N stream ") {
-    assert(true)
+    val partitionedDataList = Unsafe.unsafe { implicit unsafe =>
+      partitionStreams.head.map(st => Runtime.default.unsafe.run(st.runCollect.map(_.toList)).getOrThrow())
+    }
+    assert(partitionedDataList.forall(entitys => isDataSorted(entitys)))
   }
 
   test("mergeBeforeShuffle test : sorted ") {
-    assert(true)
+    val w1Tow2Data = Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe.run(w1Tow2.runCollect.map(_.toList)).getOrThrow()
+    }
+    assert(isDataSorted(w1Tow2Data))
   }
 
   test("mergeBeforeShuffle test : length ") {
-    assert(w1Tow2.runCount == partitionStreams(0)(1).runCount + partitionStreams(1)(1).runCount)
+    val outputLen : Long = Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe.run(w1Tow2.runCount).getOrThrow()
+    }
+    val partitionLen1 = Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe.run(partitionStreams(0)(1).runCount).getOrThrow()
+    }
+    val partitionLen2 = Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe.run(partitionStreams(1)(1).runCount).getOrThrow()
+    }
+    assert(outputLen == partitionLen1 + partitionLen2)
   }
 
   test("mergeAfterShuffle test : whole correctness ") {

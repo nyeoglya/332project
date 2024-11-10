@@ -24,8 +24,8 @@ object Main extends App {
 
   def sortSmallFile(filePath : String) : String = ???
   def produceSampleFile(filePath : String, offset : Int) : String = ???
-  def sampleFilesToSampleStream(filePaths : List[String]) : Stream[Exception, Entity] = ???
-  def splitFileIntoPartitionStreams(filePath : String) : List[Stream[Exception, Entity]] = ???
+  def sampleFilesToSampleStream(filePaths : List[String]) : List[String] = ???
+  def splitFileIntoPartitionStreams(filePath : String, way : Int) : List[Stream[Exception, Entity]] = ???
   def mergeBeforeShuffle(partitionStreams : List[Stream[Exception, Entity]]) : Stream[Exception, Entity] = ???
   def mergeAfterShuffle(workerStreams : List[Stream[Exception, Entity]]) : String = ???
 
@@ -38,10 +38,9 @@ object Main extends App {
   val originalSmallFilePaths : List[String] = ???
   val sortedSmallFilePaths : List[String] = ???
   val sampleFilePaths : List[String] = ???
-  val sampleStream : Stream[Exception, Entity] = ???
+  val sampleStream : List[String] = ???
   val partitionStreams : List[List[Stream[Exception, Entity]]] = ???
   val beforeShuffleStreams : List[Stream[Exception, Entity]] = ???
   val afterShuffleStreams : List[Stream[Exception, Entity]] = ???
   val mergedFilePath : String = ???
-
 }
