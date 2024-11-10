@@ -18,7 +18,7 @@
 
 **Week 3: Overall project design** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week3_report.html) / [Comment1](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11133877), [Comment2](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11133893), [Comment3](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11133896), [Comment4](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11134228)
 
-**Week 4: Create test code** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week4_report.html) / [Discussion1](https://github.com/nyeoglya/332project/discussions/7)
+**Week 4: Create test code** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week4_report.html) / [Discussion1](https://github.com/nyeoglya/332project/discussions/7) / [Image1](https://github.com/nyeoglya/332project/blob/main/report/worker_test_carprefer.png)
 
 **Week 5: Creating physical code and testing the system**
 
