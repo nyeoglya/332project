@@ -23,7 +23,7 @@ object Main extends App {
   config.outputDirectory.toOption.foreach(dir => println(s"Output Directory: $dir"))
 
   def sortSmallFile(filePath : String) : String = ???
-  def produceSampleFile(filePath : String) : String = ???
+  def produceSampleFile(filePath : String, offset : Int) : String = ???
   def sampleFilesToSampleStream(filePaths : List[String]) : Stream[Exception, Entity] = ???
   def splitFileIntoPartitionStreams(filePath : String) : List[Stream[Exception, Entity]] = ???
   def mergeBeforeShuffle(partitionStreams : List[Stream[Exception, Entity]]) : Stream[Exception, Entity] = ???

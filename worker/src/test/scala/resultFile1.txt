@@ -1,0 +1,10 @@
+01|Russia
+02|Canada
+03|United States
+04|China
+05|Brazil
+06|Australia
+07|India
+08|Argentina
+09|Kazakhstan
+10|Algeria
