@@ -45,11 +45,12 @@ class WorkerSuite extends FunSuite {
     List(sortSmallFile("testFile1.txt"), sortSmallFile("testFile2.txt"), sortSmallFile("testFile3.txt"), sortSmallFile("testFile4.txt"))
   lazy val sortedFileDatas =
     sortedFilePaths.map(path => readTestFile(path))
-  /*
+
   val sampledFilePaths =
     sortedFilePaths.map(path => produceSampleFile(path, offset))
   val sampledFileDatas =
     sampledFilePaths.map(path => readTestFile(path))
+    /*
   val w1SampleStream = sampleFilesToSampleStream(sampledFilePaths.take(M))
   val w2SampleStream = sampleFilesToSampleStream(sampledFilePaths.drop(M))
   val partitionStreams =
@@ -73,7 +74,7 @@ class WorkerSuite extends FunSuite {
   test("sortSmallFile test : sorted correctly ") {
     assert(sortedFileDatas.forall(entitys => isDataSorted(entitys)))
   }
-/*
+
   test("produceSampleFile test : subset ") {
     assert(sampledFileDatas.last.forall(entity => sortedFileDatas.last.contains(entity)))
   }
@@ -83,9 +84,9 @@ class WorkerSuite extends FunSuite {
   }
 
   test("produceSampleFile test : length ") {
-    assert(sampledFileDatas.last.length == sortedFileDatas.last.length / offset)
+    assert(sampledFileDatas.last.length == (sortedFileDatas.last.length + offset - 1) / offset)
   }
-
+/*
   test("sampleFilesToSampleStream test : length ") {
     assert(w1SampleStream.length == sampledFileDatas(0).length + sampledFileDatas(1).length)
   }

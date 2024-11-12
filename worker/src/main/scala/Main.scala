@@ -30,7 +30,7 @@ object Main extends App {
   /**
    * this determine test mode
    */
-  val testMode = "test"
+  val testMode = true
 
   /** read file for function test
    *
@@ -68,14 +68,25 @@ object Main extends App {
   }
 
   def sortSmallFile(filePath : String) : String = {
-    val contents = readTestFile(filePath)
+    val contents =
+      if(testMode) readTestFile(filePath)
+      else List(Entity(" ", " "))
     val sortedContents = contents.sortBy(entity => entity.head)
     val sortedFileName = "sorted_" + filePath
-    writeTestFile(sortedFileName, sortedContents)
+    if(testMode) writeTestFile(sortedFileName, sortedContents) else ()
     sortedFileName
   }
 
-  def produceSampleFile(filePath : String, offset : Int) : String = ???
+  def produceSampleFile(filePath : String, offset : Int) : String = {
+    val contents =
+      if(testMode) readTestFile(filePath)
+      else List(Entity(" ", " "))
+    val sampledContents = contents.zipWithIndex.collect{ case (entity, index) if index % offset == 0 => entity}
+    val sampledFileName = "sampled_" + filePath
+    if(testMode) writeTestFile(sampledFileName, sampledContents) else ()
+    sampledFileName
+  }
+
   def sampleFilesToSampleStream(filePaths : List[String]) : List[String] = ???
   def splitFileIntoPartitionStreams(filePath : String, way : Int) : List[Stream[Exception, Entity]] = ???
   def mergeBeforeShuffle(partitionStreams : List[Stream[Exception, Entity]]) : Stream[Exception, Entity] = ???
