@@ -94,7 +94,18 @@ object Main extends App {
     else List(Entity(" ", " "))
   }
 
-  def splitFileIntoPartitionStreams(filePath : String, way : Int) : List[Stream[Exception, Entity]] = ???
+  def splitFileIntoPartitionStreams(filePath : String, pivots : List[String]) : List[Stream[Exception, Entity]] = {
+    val data =
+      if(Mode.testMode) readTestFile(filePath)
+      else List(Entity(" ", " "))
+    def splitUsingPivots(data : List[Entity], pivots: List[String]) : List[List[Entity]] = pivots match {
+      case Nil => List(data)
+      case pivot::pivots =>
+        data.takeWhile(entity => entity.head < pivot) :: splitUsingPivots(data.dropWhile(entity => entity.head < pivot), pivots)
+    }
+    splitUsingPivots(data, pivots).map(entityList => ZStream.fromIterable(entityList))
+  }
+
   def mergeBeforeShuffle(partitionStreams : List[Stream[Exception, Entity]]) : Stream[Exception, Entity] = ???
   def mergeAfterShuffle(workerStreams : List[Stream[Exception, Entity]]) : String = ???
 

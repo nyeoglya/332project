@@ -52,10 +52,12 @@ class WorkerSuite extends FunSuite {
     sampledFilePaths.map(path => readTestFile(path))
 
   val w1SampleStream = sampleFilesToSampleStream(sampledFilePaths.take(M))
-  /*
+
   val w2SampleStream = sampleFilesToSampleStream(sampledFilePaths.drop(M))
   val partitionStreams =
-    sortedFilePaths.map(path => splitFileIntoPartitionStreams(path, N))
+    sortedFilePaths.map(path => splitFileIntoPartitionStreams(path, List("21")))
+    /*
+
   val w1Tow1 =
     mergeBeforeShuffle(List(partitionStreams(0)(0), partitionStreams(1)(0)))
   val w1Tow2 =
@@ -91,7 +93,7 @@ class WorkerSuite extends FunSuite {
   test("sampleFilesToSampleStream test : length ") {
     assert(w1SampleStream.length == sampledFileDatas(0).length + sampledFileDatas(1).length)
   }
-/*
+
   test("splitFileIntoPartitionStreams test : N stream ") {
     assert(partitionStreams.head.length == N)
   }
@@ -109,7 +111,7 @@ class WorkerSuite extends FunSuite {
     }
     assert(partitionedDataList.forall(entitys => isDataSorted(entitys)))
   }
-
+/*
   test("mergeBeforeShuffle test : sorted ") {
     val w1Tow2Data = Unsafe.unsafe { implicit unsafe =>
       Runtime.default.unsafe.run(w1Tow2.runCollect.map(_.toList)).getOrThrow()
