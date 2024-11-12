@@ -3,10 +3,15 @@ package worker
 import org.rogach.scallop._
 import zio._
 import zio.stream._
-import java.io.File
+
+import java.io.{File, PrintWriter}
 import scala.io.Source
 import java.nio.file.Files
 import common.Entity
+
+//import scala.concurrent.Promise
+//import scala.concurrent.Future
+//import scala.concurrent.ExecutionContext.Implicits.global
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val masterAddress = trailArg[String](required = true, descr = "Master address (e.g., 192.168.0.1:8080)")
@@ -22,7 +27,54 @@ object Main extends App {
   config.inputDirectories.toOption.foreach(dirs => println(s"Input Directories: ${dirs.mkString(", ")}"))
   config.outputDirectory.toOption.foreach(dir => println(s"Output Directory: $dir"))
 
-  def sortSmallFile(filePath : String) : String = ???
+  /**
+   * this determine test mode
+   */
+  val testMode = "test"
+
+  /** read file for function test
+   *
+   * @param filePath test file's name
+   * @return list of entity
+   */
+  def readTestFile(filePath : String) : List[Entity] = {
+    val source = Source.fromFile("src/test/scala/" + filePath)
+    val lines = source.getLines().toList
+    source.close()
+    for {
+      line <- lines
+      words = line.split("\\|")
+    } yield Entity(words(0), words(1))
+  }
+
+  /** write result for function test
+   *
+   * @param filePath new file's name
+   * @param data new file's contents
+   */
+  def writeTestFile(filePath : String, data : List[Entity]) : Unit = {
+    val file = new File("src/test/scala/" + filePath)
+    val writer = new PrintWriter(file)
+    try {
+      data.foreach(entity => {
+        writer.write(entity.head)
+        writer.write("|")
+        writer.write(entity.body)
+        writer.write("\n")
+      })
+    } finally {
+      writer.close()
+    }
+  }
+
+  def sortSmallFile(filePath : String) : String = {
+    val contents = readTestFile(filePath)
+    val sortedContents = contents.sortBy(entity => entity.head)
+    val sortedFileName = "sorted_" + filePath
+    writeTestFile(sortedFileName, sortedContents)
+    sortedFileName
+  }
+
   def produceSampleFile(filePath : String, offset : Int) : String = ???
   def sampleFilesToSampleStream(filePaths : List[String]) : List[String] = ???
   def splitFileIntoPartitionStreams(filePath : String, way : Int) : List[Stream[Exception, Entity]] = ???

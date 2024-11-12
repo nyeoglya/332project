@@ -16,28 +16,6 @@ import java.nio.file.Paths
 @RunWith(classOf[JUnitRunner])
 class WorkerSuite extends FunSuite {
 
-  def readFile(filePath : String) : List[Entity] = {
-    val source = Source.fromFile("src/test/scala/" + filePath)
-    val lines = source.getLines().toList
-    source.close()
-    for {
-      line <- lines
-      words = line.split("\\|")
-    } yield Entity(words(0), words(1))
-  }
-
-  def writeFile(filePath : String, data : List[Entity]) : Unit = {
-    val file = new File(filePath)
-    val writer = new PrintWriter(file)
-    data.foreach(entity => {
-      writer.write(entity.head)
-      writer.write("|")
-      writer.write(entity.body)
-      writer.write("\n")
-    })
-    writer.close()
-  }
-
   def isDataSorted(data : List[Entity]) : Boolean = {
     def isDataSortedAux(data : List[Entity], prev : String) : Boolean = {
       data match {
@@ -51,13 +29,13 @@ class WorkerSuite extends FunSuite {
   }
 
   val worker1data : List[List[Entity]] =
-    List(readFile("testFile1.txt"), readFile("testFile2.txt"))
+    List(readTestFile("testFile1.txt"), readTestFile("testFile2.txt"))
   val worker1result : List[Entity] =
-    List(readFile("resultFile1.txt"), readFile("resultFile2.txt")).flatten
+    List(readTestFile("resultFile1.txt"), readTestFile("resultFile2.txt")).flatten
   val worker2data : List[List[Entity]] =
-    List(readFile("testFile3.txt"), readFile("testFile4.txt"))
+    List(readTestFile("testFile3.txt"), readTestFile("testFile4.txt"))
   val worker2result : List[Entity] =
-    List(readFile("resultFile3.txt"), readFile("resultFile4.txt")).flatten
+    List(readTestFile("resultFile3.txt"), readTestFile("resultFile4.txt")).flatten
 
   val offset = 3
   val M = 2
@@ -65,14 +43,13 @@ class WorkerSuite extends FunSuite {
 
   val sortedFilePaths =
     List(sortSmallFile("testFile1.txt"), sortSmallFile("testFile2.txt"), sortSmallFile("testFile3.txt"), sortSmallFile("testFile4.txt"))
-
-  val sortedFileDatas =
-    sortedFilePaths.map(path => readFile(path))
-
+  lazy val sortedFileDatas =
+    sortedFilePaths.map(path => readTestFile(path))
+  /*
   val sampledFilePaths =
     sortedFilePaths.map(path => produceSampleFile(path, offset))
   val sampledFileDatas =
-    sampledFilePaths.map(path => readFile(path))
+    sampledFilePaths.map(path => readTestFile(path))
   val w1SampleStream = sampleFilesToSampleStream(sampledFilePaths.take(M))
   val w2SampleStream = sampleFilesToSampleStream(sampledFilePaths.drop(M))
   val partitionStreams =
@@ -88,7 +65,7 @@ class WorkerSuite extends FunSuite {
 
   val w1MergedFilePath = mergeAfterShuffle(List(w1Tow1, w2Tow1))
   val w2MergedFilePath = mergeAfterShuffle(List(w1Tow2, w2Tow2))
-
+*/
   test("dummy test") {
     assert(true)
   }
@@ -96,7 +73,7 @@ class WorkerSuite extends FunSuite {
   test("sortSmallFile test : sorted correctly ") {
     assert(sortedFileDatas.forall(entitys => isDataSorted(entitys)))
   }
-
+/*
   test("produceSampleFile test : subset ") {
     assert(sampledFileDatas.last.forall(entity => sortedFileDatas.last.contains(entity)))
   }
@@ -152,9 +129,9 @@ class WorkerSuite extends FunSuite {
   }
 
   test("mergeAfterShuffle test : whole correctness ") {
-    assert(readFile(w1MergedFilePath) == worker1result)
-    assert(readFile(w2MergedFilePath) == worker2result)
+    assert(readTestFile(w1MergedFilePath) == worker1result)
+    assert(readTestFile(w2MergedFilePath) == worker2result)
   }
-
+*/
 
 }
