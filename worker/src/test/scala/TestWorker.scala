@@ -50,8 +50,9 @@ class WorkerSuite extends FunSuite {
     sortedFilePaths.map(path => produceSampleFile(path, offset))
   val sampledFileDatas =
     sampledFilePaths.map(path => readTestFile(path))
-    /*
+
   val w1SampleStream = sampleFilesToSampleStream(sampledFilePaths.take(M))
+  /*
   val w2SampleStream = sampleFilesToSampleStream(sampledFilePaths.drop(M))
   val partitionStreams =
     sortedFilePaths.map(path => splitFileIntoPartitionStreams(path, N))
@@ -86,11 +87,11 @@ class WorkerSuite extends FunSuite {
   test("produceSampleFile test : length ") {
     assert(sampledFileDatas.last.length == (sortedFileDatas.last.length + offset - 1) / offset)
   }
-/*
+
   test("sampleFilesToSampleStream test : length ") {
     assert(w1SampleStream.length == sampledFileDatas(0).length + sampledFileDatas(1).length)
   }
-
+/*
   test("splitFileIntoPartitionStreams test : N stream ") {
     assert(partitionStreams.head.length == N)
   }

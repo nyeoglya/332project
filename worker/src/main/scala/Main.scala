@@ -20,6 +20,11 @@ class Config(args: Seq[String]) extends ScallopConf(args) {
   verify()
 }
 
+object Mode {
+  val testMode = true
+  def setMode() = ()
+}
+
 object Main extends App {
   val config = new Config(args)
 
@@ -27,10 +32,7 @@ object Main extends App {
   config.inputDirectories.toOption.foreach(dirs => println(s"Input Directories: ${dirs.mkString(", ")}"))
   config.outputDirectory.toOption.foreach(dir => println(s"Output Directory: $dir"))
 
-  /**
-   * this determine test mode
-   */
-  val testMode = true
+  Mode.setMode()
 
   /** read file for function test
    *
@@ -68,31 +70,35 @@ object Main extends App {
   }
 
   def sortSmallFile(filePath : String) : String = {
-    val contents =
-      if(testMode) readTestFile(filePath)
+    val data =
+      if(Mode.testMode) readTestFile(filePath)
       else List(Entity(" ", " "))
-    val sortedContents = contents.sortBy(entity => entity.head)
+    val sortedData = data.sortBy(entity => entity.head)
     val sortedFileName = "sorted_" + filePath
-    if(testMode) writeTestFile(sortedFileName, sortedContents) else ()
+    if(Mode.testMode) writeTestFile(sortedFileName, sortedData) else ()
     sortedFileName
   }
 
   def produceSampleFile(filePath : String, offset : Int) : String = {
-    val contents =
-      if(testMode) readTestFile(filePath)
+    val data =
+      if(Mode.testMode) readTestFile(filePath)
       else List(Entity(" ", " "))
-    val sampledContents = contents.zipWithIndex.collect{ case (entity, index) if index % offset == 0 => entity}
+    val sampledData = data.zipWithIndex.collect{ case (entity, index) if index % offset == 0 => entity}
     val sampledFileName = "sampled_" + filePath
-    if(testMode) writeTestFile(sampledFileName, sampledContents) else ()
+    if(Mode.testMode) writeTestFile(sampledFileName, sampledData) else ()
     sampledFileName
   }
 
-  def sampleFilesToSampleStream(filePaths : List[String]) : List[String] = ???
+  def sampleFilesToSampleStream(filePaths : List[String]) : List[Entity] = {
+    if(Mode.testMode) filePaths.flatMap(name => readTestFile(name))
+    else List(Entity(" ", " "))
+  }
+
   def splitFileIntoPartitionStreams(filePath : String, way : Int) : List[Stream[Exception, Entity]] = ???
   def mergeBeforeShuffle(partitionStreams : List[Stream[Exception, Entity]]) : Stream[Exception, Entity] = ???
   def mergeAfterShuffle(workerStreams : List[Stream[Exception, Entity]]) : String = ???
 
-  val machineNumber : Int = ???
+  val machineNumber : Int = 1
   val numberOfFiles : Int = ???
   val pivotList : List[String] = ???
   val workerIpList : List[String] = ???
