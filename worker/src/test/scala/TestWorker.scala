@@ -65,10 +65,7 @@ class WorkerSuite extends FunSuite {
     mergeBeforeShuffle(List(partitionStreams(2)(0), partitionStreams(3)(0)))
   val w2Tow2 =
     mergeBeforeShuffle(List(partitionStreams(2)(1), partitionStreams(3)(1)))
-/*
-  val w1MergedFilePath = mergeAfterShuffle(List(w1Tow1, w2Tow1))
-  val w2MergedFilePath = mergeAfterShuffle(List(w1Tow2, w2Tow2))
-*/
+
   test("dummy test") {
     assert(true)
   }
@@ -142,11 +139,12 @@ class WorkerSuite extends FunSuite {
     }
     assert(outputLen == partitionLen1 + partitionLen2)
   }
-/*
+
   test("mergeAfterShuffle test : whole correctness ") {
+    val w1MergedFilePath = mergeAfterShuffle(List(w1Tow1, w2Tow1))
     assert(readTestFile(w1MergedFilePath) == worker1result)
+    val w2MergedFilePath = mergeAfterShuffle(List(w1Tow2, w2Tow2))
     assert(readTestFile(w2MergedFilePath) == worker2result)
   }
-*/
 
 }

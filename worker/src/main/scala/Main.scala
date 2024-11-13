@@ -3,6 +3,7 @@ package worker
 import org.rogach.scallop._
 import zio._
 import zio.stream._
+import zio.Task
 
 import java.io.{File, PrintWriter}
 import scala.io.Source
@@ -71,6 +72,27 @@ object Main extends App {
     }
   }
 
+  def writeTestFileViaStream(filePath : String, data : Stream[Exception, Entity]) : Unit = {
+    val file = new File("src/test/scala/" + filePath)
+    val writer = new PrintWriter(file)
+    try {
+      Unsafe unsafe {
+        implicit unsafe =>
+          Runtime.default.unsafe.run{
+            data.runForeach(entity => {
+              writer.write(entity.head)
+              writer.write("|")
+              writer.write(entity.body)
+              writer.write("\n")
+              ZIO.succeed(())
+            })
+          }
+      }
+    } finally {
+      writer.close()
+    }
+  }
+
   def zio2entity(zio : ZIO[Any, Exception, Entity]) : Entity =
     Unsafe unsafe {
       implicit unsafe =>
@@ -120,7 +142,8 @@ object Main extends App {
     partitionStreams.zipWithIndex foreach {
       case (stream, index) =>
         val head = zio2entity(stream.runHead.map(_.getOrElse(Entity("", ""))))
-        minHeap.enqueue((head, index))
+        if(head != Entity("", ""))
+          minHeap.enqueue((head, index))
     }
     def makeMergeStream(streams : List[Stream[Exception, Entity]], accStream : Stream[Exception, Entity]) : Stream[Exception, Entity] = {
       if(minHeap.isEmpty) accStream
@@ -135,7 +158,29 @@ object Main extends App {
     makeMergeStream(partitionStreams.map(_.drop(1)), ZStream.empty)
   }
 
-  def mergeAfterShuffle(workerStreams : List[Stream[Exception, Entity]]) : String = ???
+  def mergeAfterShuffle(workerStreams : List[Stream[Exception, Entity]]) : String = {
+    implicit val entityOrdering : Ordering[(Entity, Int)] = Ordering.by(_._1.head)
+    val minHeap : PriorityQueue[(Entity, Int)] = PriorityQueue.empty(entityOrdering.reverse)
+    workerStreams.zipWithIndex foreach {
+      case (stream, index) =>
+        val head = zio2entity(stream.runHead.map(_.getOrElse(Entity("", ""))))
+        minHeap.enqueue((head, index))
+    }
+    def makeMergeStream(streams : List[Stream[Exception, Entity]], accStream : Stream[Exception, Entity]) : Stream[Exception, Entity] = {
+      if(minHeap.isEmpty) accStream
+      else {
+        val (minEntity, minIndex) = minHeap.dequeue()
+        val head = zio2entity(streams(minIndex).runHead.map(_.getOrElse(Entity("", ""))))
+        val tailStream = streams(minIndex).drop(1)
+        if (head != Entity("", "")) minHeap.enqueue((head, minIndex))
+        makeMergeStream(streams.updated(minIndex, tailStream), accStream ++ ZStream.succeed(minEntity))
+      }
+    }
+    val mergedStream = makeMergeStream(workerStreams.map(_.drop(1)), ZStream.empty)
+    val fileName = "mergedFile.txt"
+    writeTestFileViaStream(fileName, mergedStream)
+    fileName
+  }
 
   val machineNumber : Int = 1
   val numberOfFiles : Int = ???
