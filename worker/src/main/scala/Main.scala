@@ -37,6 +37,23 @@ object Main extends App {
 
   Mode.setMode()
 
+  def readFile(filePath : String) : List[Entity] = {
+    if(Mode.testMode) readTestFile(filePath)
+    else readRealFile(filePath)
+  }
+  def writeFile(filePath : String, data : List[Entity]) : Unit = {
+    if(Mode.testMode) writeTestFile(filePath, data)
+    else writeRealFile(filePath, data)
+  }
+  def writeFileViaStream(filePath : String, data : Stream[Exception, Entity]) : Unit = {
+    if(Mode.testMode) writeTestFileViaStream(filePath, data)
+    else writeRealFileViaStream(filePath, data)
+  }
+
+  def readRealFile(filePath : String) : List[Entity] = Nil
+  def writeRealFile(filePath : String, data : List[Entity]) : Unit = ()
+  def writeRealFileViaStream(filePath : String, data : Stream[Exception, Entity]) : Unit = ()
+
   /** read file for function test
    *
    * @param filePath test file's name
@@ -93,41 +110,65 @@ object Main extends App {
     }
   }
 
+  /** this function extract entity from ZIO value
+   *
+   * @param zio original ZIO value
+   * @return entity that had been in ZIO
+   */
   def zio2entity(zio : ZIO[Any, Exception, Entity]) : Entity =
     Unsafe unsafe {
       implicit unsafe =>
         Runtime.default.unsafe.run(zio).getOrThrow()
     }
 
+  /** this function literally sort small File
+   *  and save sorted data in somewhere and return that path
+   *
+   * @param filePath original file's path
+   * @return sorted file's path
+   */
   def sortSmallFile(filePath : String) : String = {
-    val data =
-      if(Mode.testMode) readTestFile(filePath)
-      else List(Entity(" ", " "))
+    val data = readFile(filePath)
     val sortedData = data.sortBy(entity => entity.head)
     val sortedFileName = "sorted_" + filePath
-    if(Mode.testMode) writeTestFile(sortedFileName, sortedData) else ()
+    writeFile(sortedFileName, sortedData)
     sortedFileName
   }
 
-  def produceSampleFile(filePath : String, offset : Int) : String = {
-    val data =
-      if(Mode.testMode) readTestFile(filePath)
-      else List(Entity(" ", " "))
-    val sampledData = data.zipWithIndex.collect{ case (entity, index) if index % offset == 0 => entity}
+  /** this function sample data from given file
+   *  by striding @stride entities
+   *
+   * @param filePath given file's path(sorted)
+   * @param stride
+   * @return new sample file's path
+   */
+  def produceSampleFile(filePath : String, stride : Int) : String = {
+    val data = readFile(filePath)
+    val sampledData = data.zipWithIndex.collect{ case (entity, index) if index % stride == 0 => entity}
     val sampledFileName = "sampled_" + filePath
-    if(Mode.testMode) writeTestFile(sampledFileName, sampledData) else ()
+    writeFile(sampledFileName, sampledData)
     sampledFileName
   }
 
+  /** this function merge given sample files
+   *  and return a single merged sample data(in list)
+   *  here, 'merge' does not consider ordering. it just collects them
+   *
+   * @param filePaths list of given sample file
+   * @return merged sample data
+   */
   def sampleFilesToSampleStream(filePaths : List[String]) : List[Entity] = {
-    if(Mode.testMode) filePaths.flatMap(name => readTestFile(name))
-    else List(Entity(" ", " "))
+    filePaths.flatMap(name => readFile(name))
   }
 
+  /** this function split given file into several mini streams using pivots
+   *
+   * @param filePath target file's path
+   * @param pivots list of pivot
+   * @return list of mini streams
+   */
   def splitFileIntoPartitionStreams(filePath : String, pivots : List[String]) : List[Stream[Exception, Entity]] = {
-    val data =
-      if(Mode.testMode) readTestFile(filePath)
-      else List(Entity(" ", " "))
+    val data = readFile(filePath)
     def splitUsingPivots(data : List[Entity], pivots: List[String]) : List[List[Entity]] = pivots match {
       case Nil => List(data)
       case pivot::pivots =>
@@ -136,6 +177,14 @@ object Main extends App {
     splitUsingPivots(data, pivots).map(entityList => ZStream.fromIterable(entityList))
   }
 
+  /** this function merge list of streams into a single sorted stream
+   *  all streams in input want to go same worker so we'll make them one
+   *  using priorityQueue, we can efficiently merge streams.
+   *  to access entity in ZStream, we use zio2entity function
+   *
+   * @param partitionStreams list of partitioned streams
+   * @return a merged stream
+   */
   def mergeBeforeShuffle(partitionStreams : List[Stream[Exception, Entity]]) : Stream[Exception, Entity] = {
     implicit val entityOrdering : Ordering[(Entity, Int)] = Ordering.by(_._1.head)
     val minHeap : PriorityQueue[(Entity, Int)] = PriorityQueue.empty(entityOrdering.reverse)
@@ -158,25 +207,14 @@ object Main extends App {
     makeMergeStream(partitionStreams.map(_.drop(1)), ZStream.empty)
   }
 
+  /** this function merge list of streams into a single sorted stream(same with mergeBeforeShuffle)
+   *  and write this huge stream into single file and return its path
+   *
+   * @param workerStreams list of streams that sent by other workers
+   * @return merged file's path
+   */
   def mergeAfterShuffle(workerStreams : List[Stream[Exception, Entity]]) : String = {
-    implicit val entityOrdering : Ordering[(Entity, Int)] = Ordering.by(_._1.head)
-    val minHeap : PriorityQueue[(Entity, Int)] = PriorityQueue.empty(entityOrdering.reverse)
-    workerStreams.zipWithIndex foreach {
-      case (stream, index) =>
-        val head = zio2entity(stream.runHead.map(_.getOrElse(Entity("", ""))))
-        minHeap.enqueue((head, index))
-    }
-    def makeMergeStream(streams : List[Stream[Exception, Entity]], accStream : Stream[Exception, Entity]) : Stream[Exception, Entity] = {
-      if(minHeap.isEmpty) accStream
-      else {
-        val (minEntity, minIndex) = minHeap.dequeue()
-        val head = zio2entity(streams(minIndex).runHead.map(_.getOrElse(Entity("", ""))))
-        val tailStream = streams(minIndex).drop(1)
-        if (head != Entity("", "")) minHeap.enqueue((head, minIndex))
-        makeMergeStream(streams.updated(minIndex, tailStream), accStream ++ ZStream.succeed(minEntity))
-      }
-    }
-    val mergedStream = makeMergeStream(workerStreams.map(_.drop(1)), ZStream.empty)
+    val mergedStream = mergeBeforeShuffle(workerStreams)
     val fileName = "mergedFile.txt"
     writeTestFileViaStream(fileName, mergedStream)
     fileName
