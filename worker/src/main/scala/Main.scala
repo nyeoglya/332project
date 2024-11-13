@@ -9,6 +9,8 @@ import scala.io.Source
 import java.nio.file.Files
 import common.Entity
 
+import scala.collection.mutable.PriorityQueue
+
 //import scala.concurrent.Promise
 //import scala.concurrent.Future
 //import scala.concurrent.ExecutionContext.Implicits.global
@@ -69,6 +71,12 @@ object Main extends App {
     }
   }
 
+  def zio2entity(zio : ZIO[Any, Exception, Entity]) : Entity =
+    Unsafe unsafe {
+      implicit unsafe =>
+        Runtime.default.unsafe.run(zio).getOrThrow()
+    }
+
   def sortSmallFile(filePath : String) : String = {
     val data =
       if(Mode.testMode) readTestFile(filePath)
@@ -106,7 +114,27 @@ object Main extends App {
     splitUsingPivots(data, pivots).map(entityList => ZStream.fromIterable(entityList))
   }
 
-  def mergeBeforeShuffle(partitionStreams : List[Stream[Exception, Entity]]) : Stream[Exception, Entity] = ???
+  def mergeBeforeShuffle(partitionStreams : List[Stream[Exception, Entity]]) : Stream[Exception, Entity] = {
+    implicit val entityOrdering : Ordering[(Entity, Int)] = Ordering.by(_._1.head)
+    val minHeap : PriorityQueue[(Entity, Int)] = PriorityQueue.empty(entityOrdering.reverse)
+    partitionStreams.zipWithIndex foreach {
+      case (stream, index) =>
+        val head = zio2entity(stream.runHead.map(_.getOrElse(Entity("", ""))))
+        minHeap.enqueue((head, index))
+    }
+    def makeMergeStream(streams : List[Stream[Exception, Entity]], accStream : Stream[Exception, Entity]) : Stream[Exception, Entity] = {
+      if(minHeap.isEmpty) accStream
+      else {
+        val (minEntity, minIndex) = minHeap.dequeue()
+        val head = zio2entity(streams(minIndex).runHead.map(_.getOrElse(Entity("", ""))))
+        val tailStream = streams(minIndex).drop(1)
+        if (head != Entity("", "")) minHeap.enqueue((head, minIndex))
+        makeMergeStream(streams.updated(minIndex, tailStream), accStream ++ ZStream.succeed(minEntity))
+      }
+    }
+    makeMergeStream(partitionStreams.map(_.drop(1)), ZStream.empty)
+  }
+
   def mergeAfterShuffle(workerStreams : List[Stream[Exception, Entity]]) : String = ???
 
   val machineNumber : Int = 1
