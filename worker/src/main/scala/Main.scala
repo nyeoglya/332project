@@ -3,7 +3,6 @@ package worker
 import org.rogach.scallop._
 import zio._
 import zio.stream._
-import zio.Task
 
 import java.io.{File, PrintWriter}
 import scala.io.Source
@@ -11,6 +10,7 @@ import java.nio.file.Files
 import common.Entity
 
 import scala.collection.mutable.PriorityQueue
+import scala.language.postfixOps
 
 //import scala.concurrent.Promise
 //import scala.concurrent.Future
@@ -24,7 +24,11 @@ class Config(args: Seq[String]) extends ScallopConf(args) {
 }
 
 object Mode {
-  val testMode = true
+  /**
+   * "FuncTest", "WithoutNetwork", "Real"
+   */
+  var testMode = "WithoutNetworkTest"
+  var waitMode = false
   def setMode() = ()
 }
 
@@ -64,21 +68,21 @@ object Main extends App {
   object PathMaker {
     def sortedSmallFile(filePath : String) : String = {
       val index = filePath.lastIndexOf('/')
-      if(Mode.testMode)
+      if(Mode.testMode == "FuncTest")
         filePath.substring(0, index + 1) + "sorted_" + filePath.substring(index + 1)
       else
-        config.outputDirectory + "/" + "sorted_" + filePath.substring(index + 1)
+        config.outputDirectory.toOption.get + "/sorted_" + filePath.substring(index + 1)
     }
     def sampleFile(filePath : String) : String = {
       val index = filePath.lastIndexOf('/')
-      if(Mode.testMode)
+      if(Mode.testMode == "FuncTest")
         filePath.substring(0, index + 1) + "sampled_" + filePath.substring(index + 1)
       else
-        config.outputDirectory + "/" + "sampled_" + filePath.substring(index + 1)
+        config.outputDirectory.toOption.get + "/sampled_" + filePath.substring(index + 1)
     }
     def mergedFile() : String = {
-      if(Mode.testMode) "src/test/funcTestFiles/output/mergedFile.txt"
-      else config.outputDirectory + "/mergedFile" + machineNumber.toString
+      if(Mode.testMode == "FuncTest") "src/test/funcTestFiles/output/mergedFile.txt"
+      else config.outputDirectory.toOption.get + "/mergedFile" + machineNumber.toString
     }
   }
 
@@ -107,7 +111,7 @@ object Main extends App {
         (key, value) = line.splitAt(10)
       } yield Entity(key.toString(), value.toString())
     }
-    if(Mode.testMode) readTestFile(filePath)
+    if(Mode.testMode == "FuncTest") readTestFile(filePath)
     else readRealFile(filePath)
   }
 
@@ -144,7 +148,7 @@ object Main extends App {
         writer.close()
       }
     }
-    if(Mode.testMode) writeTestFile(filePath, data)
+    if(Mode.testMode == "FuncTest") writeTestFile(filePath, data)
     else writeRealFile(filePath, data)
   }
 
@@ -196,7 +200,7 @@ object Main extends App {
         writer.close()
       }
     }
-    if(Mode.testMode) writeTestFileViaStream(filePath, data)
+    if(Mode.testMode == "FuncTest") writeTestFileViaStream(filePath, data)
     else writeRealFileViaStream(filePath, data)
   }
 
@@ -233,6 +237,7 @@ object Main extends App {
    * @return new sample file's path
    */
   def produceSampleFile(filePath : String, stride : Int) : String = {
+    assert(stride > 0)
     val data = readFile(filePath)
     val sampledData = data.zipWithIndex.collect{ case (entity, index) if index % stride == 0 => entity}
     val sampledFilePath = PathMaker.sampleFile(filePath)
@@ -258,6 +263,7 @@ object Main extends App {
    * @return list of mini streams
    */
   def splitFileIntoPartitionStreams(filePath : String, pivots : List[String]) : List[Stream[Exception, Entity]] = {
+    assert(pivots.nonEmpty)
     val data = readFile(filePath)
     def splitUsingPivots(data : List[Entity], pivots: List[String]) : List[List[Entity]] = pivots match {
       case Nil => List(data)
@@ -310,23 +316,35 @@ object Main extends App {
     filePath
   }
 
-  val machineNumber : Int = 1
-  val numberOfFiles : Int = ???
-  val pivotList : List[String] = ???
-  val workerIpList : List[String] = ???
-  val sampleOffset : Int = ???
+  var machineNumber : Int = 1
+  val numberOfFiles : Int = 1
+  var pivotList : List[String] = List("")
+  val workerIpList : List[String] = List("")
+  val sampleOffset : Int = 100
+
+  def setMachineNumber(num : Int) : Unit = { machineNumber = num }
+  def setPivotList(pivots : List[String]) : Unit = { pivotList = pivots }
+  def waitForCondition(condition : Boolean, interval: Duration) : Unit = {
+    def check : Unit = {
+      if(condition) ()
+      else {
+        ZIO.sleep(interval)
+        check
+      }
+    }
+    check
+  }
 
   /// real workflow begin from here //////////////////////////////////////////////////////////////////////////////////
 
-  val originalSmallFilePaths : List[String] =
+  val originalSmallFilePaths : List[String] = {
     config.inputDirectories.toOption.getOrElse(List(""))
       .flatMap{ directoryPath =>
         val directory = new File(directoryPath)
-        directory.listFiles.map(_.getPath).toList
+        directory.listFiles.map(_.getPath.replace("\\", "/")).toList
       }
-
+  }
   // send data to master and wait 'getSample' command from master
-
   /**
    * TODO : make it parallel
    */
@@ -341,6 +359,10 @@ object Main extends App {
 
   // send sampleStream and wait pivotList
   // after receive pivotList, send stream request to other workers
+
+  val waitPivotList =
+    if(Mode.waitMode) waitForCondition(pivotList != List(""), 100 millis)
+    else ()
 
   /**
    * TODO : make it parallel
@@ -358,5 +380,5 @@ object Main extends App {
 
   // wait until receive all stream from other workers
 
-  val mergedFilePath : String = mergeAfterShuffle(???)
+  val mergedFilePath : String = mergeAfterShuffle(List(ZStream.succeed(Entity("",""))))
 }

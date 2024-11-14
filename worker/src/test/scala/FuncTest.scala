@@ -14,7 +14,7 @@ import zio.stream._
 import java.nio.file.Paths
 
 @RunWith(classOf[JUnitRunner])
-class WorkerSuite extends FunSuite {
+class WorkerFuncSuite extends FunSuite {
 
   def isDataSorted(data : List[Entity]) : Boolean = {
     def isDataSortedAux(data : List[Entity], prev : String) : Boolean = {
@@ -27,6 +27,8 @@ class WorkerSuite extends FunSuite {
     }
     isDataSortedAux(data, "00")
   }
+
+  Mode.testMode = "FuncTest"
 
   val worker1data : List[List[Entity]] =
     List(readFile("src/test/funcTestFiles/testFile1.txt"), readFile("src/test/funcTestFiles/testFile2.txt"))
