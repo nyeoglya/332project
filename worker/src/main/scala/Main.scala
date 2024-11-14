@@ -28,6 +28,29 @@ object Mode {
   def setMode() = ()
 }
 
+/** Worker's Main function
+ *
+ *  모드에 따라 파일의 양식, path 위치가 다르기에, 편의를 위해 [[readFile]], [[writeFile]], [[PathMaker]] 를 정의해 사용하였다.
+ *
+ *  주요 함수들은 아래와 같다.
+ *
+ *  [[sortSmallFile]]
+ *  [[produceSampleFile]]
+ *  [[sampleFilesToSampleStream]]
+ *  [[splitFileIntoPartitionStreams]]
+ *  [[mergeBeforeShuffle]]
+ *  [[mergeAfterShuffle]]
+ *
+ *  각각은 그저 일반 함수처럼 동작한다.
+ *  위의 함수들을 병렬적으로 돌리고, 기다리는 작업은 밑의 "real workflow begin from here" 부분에서 시행한다.
+ *
+ *  TODO #1 : 병렬화
+ *
+ *  TODO #2 : 네트워크 서비스와의 연결
+ *
+ *  TODO #3 : 중간 파일 지우기
+ *
+ */
 object Main extends App {
   val config = new Config(args)
 
@@ -37,77 +60,144 @@ object Main extends App {
 
   Mode.setMode()
 
+
+  object PathMaker {
+    def sortedSmallFile(filePath : String) : String = {
+      val index = filePath.lastIndexOf('/')
+      if(Mode.testMode)
+        filePath.substring(0, index + 1) + "sorted_" + filePath.substring(index + 1)
+      else
+        config.outputDirectory + "/" + "sorted_" + filePath.substring(index + 1)
+    }
+    def sampleFile(filePath : String) : String = {
+      val index = filePath.lastIndexOf('/')
+      if(Mode.testMode)
+        filePath.substring(0, index + 1) + "sampled_" + filePath.substring(index + 1)
+      else
+        config.outputDirectory + "/" + "sampled_" + filePath.substring(index + 1)
+    }
+    def mergedFile() : String = {
+      if(Mode.testMode) "src/test/funcTestFiles/output/mergedFile.txt"
+      else config.outputDirectory + "/mergedFile" + machineNumber.toString
+    }
+  }
+
+  /** read file from filePath and return its data in a list of Entity
+   *  depending on mode, it works differently
+   *
+   * @param filePath path of the file to read
+   * @return data of the file read
+   */
   def readFile(filePath : String) : List[Entity] = {
+    def readTestFile(filePath : String) : List[Entity] = {
+      val source = Source.fromFile(filePath)
+      val lines = source.getLines().toList
+      source.close()
+      for {
+        line <- lines
+        words = line.split("\\|")
+      } yield Entity(words(0), words(1))
+    }
+    def readRealFile(filePath : String) : List[Entity] = {
+      val source = Source.fromFile(filePath)
+      val lines = source.grouped(100).toList
+      source.close()
+      for {
+        line <- lines
+        (key, value) = line.splitAt(10)
+      } yield Entity(key.toString(), value.toString())
+    }
     if(Mode.testMode) readTestFile(filePath)
     else readRealFile(filePath)
   }
+
+  /** write data to new file
+   *  depending on mode, it works differently
+   *
+   * @param filePath path of the file to write
+   * @param data a list of entity to write
+   */
   def writeFile(filePath : String, data : List[Entity]) : Unit = {
+    def writeTestFile(filePath : String, data : List[Entity]) : Unit = {
+      val file = new File(filePath)
+      val writer = new PrintWriter(file)
+      try {
+        data.foreach(entity => {
+          writer.write(entity.head)
+          writer.write("|")
+          writer.write(entity.body)
+          writer.write("\n")
+        })
+      } finally {
+        writer.close()
+      }
+    }
+    def writeRealFile(filePath : String, data : List[Entity]) : Unit = {
+      val file = new File(filePath)
+      val writer = new PrintWriter(file)
+      try {
+        data.foreach(entity => {
+          writer.write(entity.head)
+          writer.write(entity.body)
+        })
+      } finally {
+        writer.close()
+      }
+    }
     if(Mode.testMode) writeTestFile(filePath, data)
     else writeRealFile(filePath, data)
   }
+
+  /** write data to new file through stream
+   *  depending on mode, it works differently
+   *
+   *  because size of file is limited when we write file in a normal way,
+   *  we introduce stream to write huge entities on one single file
+   *
+   * @param filePath path of the file to write
+   * @param data a list of entity to write(huge)
+   */
   def writeFileViaStream(filePath : String, data : Stream[Exception, Entity]) : Unit = {
+    def writeTestFileViaStream(filePath : String, data : Stream[Exception, Entity]) : Unit = {
+      val file = new File(filePath)
+      val writer = new PrintWriter(file)
+      try {
+        Unsafe unsafe {
+          implicit unsafe =>
+            Runtime.default.unsafe.run{
+              data.runForeach(entity => {
+                writer.write(entity.head)
+                writer.write("|")
+                writer.write(entity.body)
+                writer.write("\n")
+                ZIO.succeed(())
+              })
+            }
+        }
+      } finally {
+        writer.close()
+      }
+    }
+    def writeRealFileViaStream(filePath : String, data : Stream[Exception, Entity]) : Unit = {
+      val file = new File(filePath)
+      val writer = new PrintWriter(file)
+      try {
+        Unsafe unsafe {
+          implicit unsafe =>
+            Runtime.default.unsafe.run{
+              data.runForeach(entity => {
+                writer.write(entity.head)
+                writer.write(entity.body)
+                ZIO.succeed(())
+              })
+            }
+        }
+      } finally {
+        writer.close()
+      }
+    }
     if(Mode.testMode) writeTestFileViaStream(filePath, data)
     else writeRealFileViaStream(filePath, data)
-  }
-
-  def readRealFile(filePath : String) : List[Entity] = Nil
-  def writeRealFile(filePath : String, data : List[Entity]) : Unit = ()
-  def writeRealFileViaStream(filePath : String, data : Stream[Exception, Entity]) : Unit = ()
-
-  /** read file for function test
-   *
-   * @param filePath test file's name
-   * @return list of entity
-   */
-  def readTestFile(filePath : String) : List[Entity] = {
-    val source = Source.fromFile("src/test/scala/" + filePath)
-    val lines = source.getLines().toList
-    source.close()
-    for {
-      line <- lines
-      words = line.split("\\|")
-    } yield Entity(words(0), words(1))
-  }
-
-  /** write result for function test
-   *
-   * @param filePath new file's name
-   * @param data new file's contents
-   */
-  def writeTestFile(filePath : String, data : List[Entity]) : Unit = {
-    val file = new File("src/test/scala/" + filePath)
-    val writer = new PrintWriter(file)
-    try {
-      data.foreach(entity => {
-        writer.write(entity.head)
-        writer.write("|")
-        writer.write(entity.body)
-        writer.write("\n")
-      })
-    } finally {
-      writer.close()
-    }
-  }
-
-  def writeTestFileViaStream(filePath : String, data : Stream[Exception, Entity]) : Unit = {
-    val file = new File("src/test/scala/" + filePath)
-    val writer = new PrintWriter(file)
-    try {
-      Unsafe unsafe {
-        implicit unsafe =>
-          Runtime.default.unsafe.run{
-            data.runForeach(entity => {
-              writer.write(entity.head)
-              writer.write("|")
-              writer.write(entity.body)
-              writer.write("\n")
-              ZIO.succeed(())
-            })
-          }
-      }
-    } finally {
-      writer.close()
-    }
   }
 
   /** this function extract entity from ZIO value
@@ -130,9 +220,9 @@ object Main extends App {
   def sortSmallFile(filePath : String) : String = {
     val data = readFile(filePath)
     val sortedData = data.sortBy(entity => entity.head)
-    val sortedFileName = "sorted_" + filePath
-    writeFile(sortedFileName, sortedData)
-    sortedFileName
+    val sortedFilePath = PathMaker.sortedSmallFile(filePath)
+    writeFile(sortedFilePath, sortedData)
+    sortedFilePath
   }
 
   /** this function sample data from given file
@@ -145,9 +235,9 @@ object Main extends App {
   def produceSampleFile(filePath : String, stride : Int) : String = {
     val data = readFile(filePath)
     val sampledData = data.zipWithIndex.collect{ case (entity, index) if index % stride == 0 => entity}
-    val sampledFileName = "sampled_" + filePath
-    writeFile(sampledFileName, sampledData)
-    sampledFileName
+    val sampledFilePath = PathMaker.sampleFile(filePath)
+    writeFile(sampledFilePath, sampledData)
+    sampledFilePath
   }
 
   /** this function merge given sample files
@@ -158,7 +248,7 @@ object Main extends App {
    * @return merged sample data
    */
   def sampleFilesToSampleStream(filePaths : List[String]) : List[Entity] = {
-    filePaths.flatMap(name => readFile(name))
+    filePaths.flatMap(path => readFile(path))
   }
 
   /** this function split given file into several mini streams using pivots
@@ -215,9 +305,9 @@ object Main extends App {
    */
   def mergeAfterShuffle(workerStreams : List[Stream[Exception, Entity]]) : String = {
     val mergedStream = mergeBeforeShuffle(workerStreams)
-    val fileName = "mergedFile.txt"
-    writeTestFileViaStream(fileName, mergedStream)
-    fileName
+    val filePath = PathMaker.mergedFile()
+    writeFileViaStream(filePath, mergedStream)
+    filePath
   }
 
   val machineNumber : Int = 1
@@ -226,12 +316,47 @@ object Main extends App {
   val workerIpList : List[String] = ???
   val sampleOffset : Int = ???
 
-  val originalSmallFilePaths : List[String] = ???
-  val sortedSmallFilePaths : List[String] = ???
-  val sampleFilePaths : List[String] = ???
-  val sampleStream : List[String] = ???
-  val partitionStreams : List[List[Stream[Exception, Entity]]] = ???
-  val beforeShuffleStreams : List[Stream[Exception, Entity]] = ???
-  val afterShuffleStreams : List[Stream[Exception, Entity]] = ???
-  val mergedFilePath : String = ???
+  /// real workflow begin from here //////////////////////////////////////////////////////////////////////////////////
+
+  val originalSmallFilePaths : List[String] =
+    config.inputDirectories.toOption.getOrElse(List(""))
+      .flatMap{ directoryPath =>
+        val directory = new File(directoryPath)
+        directory.listFiles.map(_.getPath).toList
+      }
+
+  // send data to master and wait 'getSample' command from master
+
+  /**
+   * TODO : make it parallel
+   */
+  val sortedSmallFilePaths : List[String] = originalSmallFilePaths.map(path => sortSmallFile(path))
+
+  /**
+   * TODO : make it parallel
+   */
+  val sampleFilePaths : List[String] = sortedSmallFilePaths.map(path => produceSampleFile(path, sampleOffset))
+
+  val sampleStream : List[Entity] = sampleFilesToSampleStream(sampleFilePaths)
+
+  // send sampleStream and wait pivotList
+  // after receive pivotList, send stream request to other workers
+
+  /**
+   * TODO : make it parallel
+   */
+  val partitionStreams : List[List[Stream[Exception, Entity]]] =
+    sortedSmallFilePaths.map(path => splitFileIntoPartitionStreams(path, pivotList))
+
+  val toWorkerStreams = workerIpList.indices.map(n => partitionStreams.collect(_(n))).toList
+
+  /**
+   * TODO : make it parallel
+   */
+  val beforeShuffleStreams : List[Stream[Exception, Entity]] =
+    toWorkerStreams.map(toWorkerN => mergeBeforeShuffle(toWorkerN))
+
+  // wait until receive all stream from other workers
+
+  val mergedFilePath : String = mergeAfterShuffle(???)
 }

@@ -29,27 +29,27 @@ class WorkerSuite extends FunSuite {
   }
 
   val worker1data : List[List[Entity]] =
-    List(readTestFile("testFile1.txt"), readTestFile("testFile2.txt"))
+    List(readFile("src/test/funcTestFiles/testFile1.txt"), readFile("src/test/funcTestFiles/testFile2.txt"))
   val worker1result : List[Entity] =
-    List(readTestFile("resultFile1.txt"), readTestFile("resultFile2.txt")).flatten
+    List(readFile("src/test/funcTestFiles/resultFile1.txt"), readFile("src/test/funcTestFiles/resultFile2.txt")).flatten
   val worker2data : List[List[Entity]] =
-    List(readTestFile("testFile3.txt"), readTestFile("testFile4.txt"))
+    List(readFile("src/test/funcTestFiles/testFile3.txt"), readFile("src/test/funcTestFiles/testFile4.txt"))
   val worker2result : List[Entity] =
-    List(readTestFile("resultFile3.txt"), readTestFile("resultFile4.txt")).flatten
+    List(readFile("src/test/funcTestFiles/resultFile3.txt"), readFile("src/test/funcTestFiles/resultFile4.txt")).flatten
 
   val offset = 3
   val M = 2
   val N = 2
 
   val sortedFilePaths =
-    List(sortSmallFile("testFile1.txt"), sortSmallFile("testFile2.txt"), sortSmallFile("testFile3.txt"), sortSmallFile("testFile4.txt"))
+    List(sortSmallFile("src/test/funcTestFiles/testFile1.txt"), sortSmallFile("src/test/funcTestFiles/testFile2.txt"), sortSmallFile("src/test/funcTestFiles/testFile3.txt"), sortSmallFile("src/test/funcTestFiles/testFile4.txt"))
   lazy val sortedFileDatas =
-    sortedFilePaths.map(path => readTestFile(path))
+    sortedFilePaths.map(path => readFile(path))
 
   val sampledFilePaths =
     sortedFilePaths.map(path => produceSampleFile(path, offset))
   val sampledFileDatas =
-    sampledFilePaths.map(path => readTestFile(path))
+    sampledFilePaths.map(path => readFile(path))
 
   val w1SampleStream = sampleFilesToSampleStream(sampledFilePaths.take(M))
 
@@ -142,9 +142,9 @@ class WorkerSuite extends FunSuite {
 
   test("mergeAfterShuffle test : whole correctness ") {
     val w1MergedFilePath = mergeAfterShuffle(List(w1Tow1, w2Tow1))
-    assert(readTestFile(w1MergedFilePath) == worker1result)
+    assert(readFile(w1MergedFilePath) == worker1result)
     val w2MergedFilePath = mergeAfterShuffle(List(w1Tow2, w2Tow2))
-    assert(readTestFile(w2MergedFilePath) == worker2result)
+    assert(readFile(w2MergedFilePath) == worker2result)
   }
 
 }
