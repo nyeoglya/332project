@@ -6,15 +6,10 @@ import zio.stream._
 
 import java.io.{File, PrintWriter}
 import scala.io.Source
-import java.nio.file.Files
 import common.Entity
 
 import scala.collection.mutable.PriorityQueue
 import scala.language.postfixOps
-
-//import scala.concurrent.Promise
-//import scala.concurrent.Future
-//import scala.concurrent.ExecutionContext.Implicits.global
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val masterAddress = trailArg[String](required = true, descr = "Master address (e.g., 192.168.0.1:8080)")
@@ -23,12 +18,20 @@ class Config(args: Seq[String]) extends ScallopConf(args) {
   verify()
 }
 
+/**
+ * this object enables test without network service
+ * by setting this before entering Main App(before Main.main(args)),
+ * we can transform data to Worker manually
+ */
 object Mode {
   /**
    * "FuncTest", "WithoutNetwork", "Real"
    */
   var testMode = "WithoutNetworkTest"
-  var waitMode = false
+  var machineNumber = 1
+  var pivotList = List("")
+  var shuffledStreams = List.empty[Stream[Exception, Entity]]
+
   def setMode() = ()
 }
 
@@ -53,6 +56,8 @@ object Mode {
  *  TODO #2 : 네트워크 서비스와의 연결
  *
  *  TODO #3 : 중간 파일 지우기
+ *
+ *  TODO #4 : sample 파일 key 로만 구성
  *
  */
 object Main extends App {
@@ -109,7 +114,7 @@ object Main extends App {
       for {
         line <- lines
         (key, value) = line.splitAt(10)
-      } yield Entity(key.toString(), value.toString())
+      } yield Entity(key.mkString, value.mkString)
     }
     if(Mode.testMode == "FuncTest") readTestFile(filePath)
     else readRealFile(filePath)
@@ -316,24 +321,15 @@ object Main extends App {
     filePath
   }
 
-  var machineNumber : Int = 1
+  val machineNumber : Int =
+    if(Mode.testMode == "WithoutNetworkTest") Mode.machineNumber
+    else 1
   val numberOfFiles : Int = 1
-  var pivotList : List[String] = List("")
+  val pivotList :List[String] =
+    if(Mode.testMode == "WithoutNetworkTest") Mode.pivotList
+    else List("")
   val workerIpList : List[String] = List("")
   val sampleOffset : Int = 100
-
-  def setMachineNumber(num : Int) : Unit = { machineNumber = num }
-  def setPivotList(pivots : List[String]) : Unit = { pivotList = pivots }
-  def waitForCondition(condition : Boolean, interval: Duration) : Unit = {
-    def check : Unit = {
-      if(condition) ()
-      else {
-        ZIO.sleep(interval)
-        check
-      }
-    }
-    check
-  }
 
   /// real workflow begin from here //////////////////////////////////////////////////////////////////////////////////
 
@@ -360,17 +356,17 @@ object Main extends App {
   // send sampleStream and wait pivotList
   // after receive pivotList, send stream request to other workers
 
-  val waitPivotList =
-    if(Mode.waitMode) waitForCondition(pivotList != List(""), 100 millis)
-    else ()
-
   /**
    * TODO : make it parallel
    */
   val partitionStreams : List[List[Stream[Exception, Entity]]] =
     sortedSmallFilePaths.map(path => splitFileIntoPartitionStreams(path, pivotList))
 
-  val toWorkerStreams = workerIpList.indices.map(n => partitionStreams.collect(_(n))).toList
+  val toWorkerStreams = for {
+    n <- (0 to pivotList.length).toList
+    toN = partitionStreams.map(_(n))
+  } yield toN
+
 
   /**
    * TODO : make it parallel
@@ -379,6 +375,10 @@ object Main extends App {
     toWorkerStreams.map(toWorkerN => mergeBeforeShuffle(toWorkerN))
 
   // wait until receive all stream from other workers
+  val shuffledStreams =
+    if(Mode.testMode == "WithoutNetworkTest") Mode.shuffledStreams
+    else List(ZStream.succeed(Entity("","")))
 
-  val mergedFilePath : String = mergeAfterShuffle(List(ZStream.succeed(Entity("",""))))
+
+  val mergedFilePath : String = mergeAfterShuffle(shuffledStreams)
 }

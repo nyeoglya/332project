@@ -14,7 +14,7 @@ import zio.stream._
 import java.nio.file.Paths
 
 @RunWith(classOf[JUnitRunner])
-class WorkerFuncSuite extends FunSuite {
+class FuncSuite extends FunSuite {
 
   def isDataSorted(data : List[Entity]) : Boolean = {
     def isDataSortedAux(data : List[Entity], prev : String) : Boolean = {
