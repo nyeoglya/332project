@@ -10,13 +10,14 @@ import io.grpc.StatusException
 import io.grpc.ServerBuilder
 import io.grpc.protobuf.services.ProtoReflectionService
 import proto.common.{SampleRequest, Entity}
-import scalapb.zio_grpc
-import scala.collection.mutable.PriorityQueue
-import scala.language.postfixOps
 import proto.common.DataResponse
 import proto.common.SortResponse
 import proto.common.Partition
 import proto.common.ZioCommon.WorkerService
+import scalapb.zio_grpc
+import java.nio.file.Files
+import scala.collection.mutable.PriorityQueue
+import scala.language.postfixOps
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val inputDirectories = opt[List[String]](name = "I", descr = "Input directories", default = Some(List()))
@@ -124,13 +125,15 @@ class WorkerLogic(config: Config) extends ServiceLogic {
  *  각각은 그저 일반 함수처럼 동작한다.
  *  위의 함수들을 병렬적으로 돌리고, 기다리는 작업은 밑의 "real workflow begin from here" 부분에서 시행한다.
  *
- *  TODO #1 : 병렬화
+ *  - [ ] TODO #1 : 병렬화
  *
- *  TODO #2 : 네트워크 서비스와의 연결
+ *  - [ ] TODO #2 : 네트워크 서비스와의 연결
  *
- *  TODO #3 : 중간 파일 지우기
+ *  - [x] TODO #3 : 중간 파일 지우기
  *
- *  TODO #4 : sample 파일 key 로만 구성
+ *  - [x] TODO #4 : sample 파일 key 로만 구성
+ *
+ *  - [ ] TODO #5 : error handling 추가
  *
  */
 object WorkerCodes extends App {
@@ -253,8 +256,8 @@ object WorkerCodes extends App {
    * @param filePaths list of given sample file
    * @return merged sample data
    */
-  def sampleFilesToSampleStream(filePaths : List[String]) : List[Entity] = {
-    filePaths.flatMap(path => readFile(path))
+  def sampleFilesToSampleStream(filePaths : List[String]) : List[String] = {
+    filePaths.flatMap(path => readFile(path)).map(entity => entity.head)
   }
 
   /** this function split given file into several mini streams using pivots
@@ -354,7 +357,9 @@ object WorkerCodes extends App {
    */
   val sampleFilePaths : List[String] = sortedSmallFilePaths.map(path => produceSampleFile(path, sampleOffset))
 
-  val sampleStream : List[Entity] = sampleFilesToSampleStream(sampleFilePaths)
+  val sampleStream : List[String] = sampleFilesToSampleStream(sampleFilePaths)
+
+  sampleFilePaths.foreach(path => new File(path).delete())
 
   // send sampleStream and wait pivotList
   // after receive pivotList, send stream request to other workers
@@ -382,4 +387,6 @@ object WorkerCodes extends App {
 
 
   val mergedFilePath : String = mergeAfterShuffle(shuffledStreams)
+
+  sortedSmallFilePaths.foreach(path => new File(path).delete())
 }
