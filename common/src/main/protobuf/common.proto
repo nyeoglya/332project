@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package proto;
+
+service WorkerService {
+	rpc GetSamples (SampleRequest) returns (stream SampleResponse) {}
+}
+
+message SampleRequest {
+	int32 size = 1;
+}
+
+message SampleResponse {
+	bytes key = 1;
+	bytes data = 2;
+}
