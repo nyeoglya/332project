@@ -16,5 +16,11 @@ lib_managed/
 metals.sbt
 .vscode/
 
+# intellij idea
+*.iml
+*.ipr
+*.iws
+.idea
+
 # virtual machine crash logs
 hs_err_pid*

@@ -3,14 +3,23 @@ syntax = "proto3";
 package proto;
 
 service WorkerService {
-	rpc GetSamples (SampleRequest) returns (stream SampleResponse) {}
+	rpc GetSamples (SampleRequest) returns (stream Entity);
+	rpc StartSort (Partition) returns (SortResponse);
+	rpc SendData (stream Entity) returns (DataResponse);
 }
 
 message SampleRequest {
 	int32 size = 1;
 }
 
-message SampleResponse {
-	bytes key = 1;
-	bytes data = 2;
+message Entity {
+	string head = 1;
+	string body = 2;
 }
+
+message Partition {
+	repeated string pivots = 1;
+}
+
+message SortResponse {}
+message DataResponse {}

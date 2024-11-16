@@ -1,0 +1,10 @@
+02|Canada
+09|Kazakhstan
+12|Denmark
+13|Saudi Arabia
+14|Mexico
+17|Libya
+18|Iran
+25|South Africa
+26|Colombia
+27|Ethiopia
