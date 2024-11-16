@@ -3,9 +3,9 @@ ThisBuild / organization := "kr.ac.postech.green"
 ThisBuild / organizationName := "green"
 ThisBuild / scalaVersion := "2.13.15"
 
-PB.targets in Compile := Seq(
-  scalapb.gen(grpc = true) -> (sourceManaged in Compile).value / "scalapb",
-  scalapb.zio_grpc.ZioCodeGenerator -> (sourceManaged in Compile).value / "scalapb"
+Compile / PB.targets := Seq(
+  scalapb.gen(grpc = true) -> (Compile / sourceManaged).value / "scalapb",
+  scalapb.zio_grpc.ZioCodeGenerator -> (Compile / sourceManaged).value / "scalapb"
 )
 
 lazy val commonDependencies = Seq(
@@ -34,6 +34,8 @@ lazy val global = project
     worker,
     master
   )
+  .settings(
+  )
 
 lazy val common = (project in file("common"))
   .settings(
@@ -48,6 +50,9 @@ lazy val worker = (project in file("worker"))
     libraryDependencies ++= commonDependencies ++ workerDependencies,
     assembly / mainClass := Some("Main"),
     assembly / assemblyJarName := s"${name.value}.jar",
+    Compile / PB.targets := Seq(
+      scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"
+    )
   )
   .dependsOn(common)
 
@@ -57,6 +62,9 @@ lazy val master = (project in file("master"))
     libraryDependencies ++= commonDependencies ++ masterDependencies,
     assembly / mainClass := Some("Main"),
     assembly / assemblyJarName := s"${name.value}.jar",
+    Compile / PB.targets := Seq(
+      scalapb.gen() -> (Compile / sourceManaged).value / "scalapb"
+    )
   )
   .dependsOn(common)
 
