@@ -22,7 +22,7 @@ import scala.language.postfixOps
 // valsort mergedFile
 
 @RunWith(classOf[JUnitRunner])
-class WithoutNetworkSuite extends FunSuite {
+class WithoutNetworkTest extends FunSuite {
   test("dummy test") {
     assertTrue(true)
   }
@@ -36,6 +36,9 @@ class WithoutNetworkSuite extends FunSuite {
   }
 
   test("overall correctness") {
+
+    val startTime = System.nanoTime()
+
     Mode.testMode = "WithoutNetworkTest"
     val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/input -O src/test/withoutNetworkTestFiles/worker1/output".split(' ')
     val args2 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker2/input -O src/test/withoutNetworkTestFiles/worker2/output".split(' ')
@@ -49,19 +52,17 @@ class WithoutNetworkSuite extends FunSuite {
     val sample2 = Main.sampleStream
 
     val sortedSample = (sample1 ++ sample2).sortBy(entity => entity.head)
-    val pivots = List(sortedSample(sortedSample.length / 2).head)
+    val pivots = List(sortedSample(sortedSample.length / 2))
 
     Mode.machineNumber = 1
     Mode.pivotList = pivots
     Main.main(args1)
     val from1 = Main.beforeShuffleStreams
-    println(from1.length)
 
     Mode.machineNumber = 2
     Mode.pivotList = pivots
     Main.main(args2)
     val from2 = Main.beforeShuffleStreams
-    println(from2.length)
 
     Mode.machineNumber = 1
     Mode.shuffledStreams = List(from1(0), from2(0))
@@ -72,5 +73,13 @@ class WithoutNetworkSuite extends FunSuite {
     Mode.shuffledStreams = List(from1(1), from2(1))
     Main.main(args2)
     val result2 = Main.mergedFilePath
+
+    val endTime = System.nanoTime()
+    val duration = (endTime - startTime) / 1e6
+    // this is for comparing before and after parallelization
+    // to check whether parallelization really works
+    // [1st] test time : 112978.4586 ms
+    // [2nd] test time : 109899.5734 ms
+    println(s"test time : $duration ms")
   }
 }
