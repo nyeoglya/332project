@@ -1,0 +1,10 @@
+01|Russia
+03|United States
+06|Australia
+10|Algeria
+11|DR Congo
+15|Indonesia
+19|Mongolia
+21|Chad
+29|Mauritania
+30|Eqypt
