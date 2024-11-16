@@ -45,12 +45,12 @@ object Main extends ZIOAppDefault {
     .forPort(port)
     .addService(ProtoReflectionService.newInstance())
 
-  def serverLive: ZLayer[ServiceLogic, Throwable, zio_grpc.Server] = for {
-      service <- ZLayer.service[ServiceLogic]
+  def serverLive: ZLayer[WorkerServiceLogic, Throwable, zio_grpc.Server] = for {
+      service <- ZLayer.service[WorkerServiceLogic]
       result <- zio_grpc.ServerLayer.fromServiceList(builder, ServiceList.add(new ServiceImpl(service.get))) 
   } yield result
 
-  class ServiceImpl(service: ServiceLogic) extends WorkerService {
+  class ServiceImpl(service: WorkerServiceLogic) extends WorkerService {
     def getSamples(request: SampleRequest): zio.stream.Stream[StatusException,Entity] = {
       ???
     }
@@ -65,7 +65,7 @@ object Main extends ZIOAppDefault {
   }
 }
 
-trait ServiceLogic {
+trait WorkerServiceLogic {
   def inputEntities: Stream[Throwable, Entity]
 
   /** Save Entities to file system
@@ -99,7 +99,7 @@ trait ServiceLogic {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-class WorkerLogic(config: Config) extends ServiceLogic {
+class WorkerLogic(config: Config) extends WorkerServiceLogic {
   // TODO: Read files from storage
   def inputEntities: Stream[Throwable, Entity] = ???
   def saveEntities(data: Stream[Throwable,Entity]): Unit = ???
