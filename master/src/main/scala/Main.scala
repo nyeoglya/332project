@@ -17,6 +17,7 @@ import proto.common.ZioCommon.MasterService
 import io.grpc.StatusException
 import proto.common.{WorkerData, WorkerDataResponse}
 import common.AddressParser
+import proto.common.SampleRequest
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val workerNum = trailArg[Int](required = true, descr = "Number of workers", default = Some(1))
@@ -57,11 +58,11 @@ object Main extends ZIOAppDefault {
 ////////////////////////////////////////////////////////////////
 
 class MasterLogic(config: Config) {
-  case class Client(
+  case class WorkerClient(
     val client: Layer[Throwable, WorkerServiceClient],
     val size: BigInt
   )
-  var clients: List[Client] = List()
+  var clients: List[WorkerClient] = List()
 
   lazy val offset = ???
   lazy val workerDataList: List[WorkerData] = ???
@@ -73,7 +74,7 @@ class MasterLogic(config: Config) {
   def addClient(clientAddress: String, clientSize: BigInt) {
     println(s"New client[${clients.size}] attached: ${clientAddress}, Size: ${clientSize} Bytes")
     val address = AddressParser.parse(clientAddress).get
-    clients = clients :+ Client(WorkerServiceClient.live(
+    clients = clients :+ WorkerClient(WorkerServiceClient.live(
       ZManagedChannel(
         ManagedChannelBuilder.forAddress(address._1, address._2).usePlaintext()
       )
@@ -86,36 +87,12 @@ class MasterLogic(config: Config) {
 
   def run() = {
     println("Started!")
-    // TODO: Collect samples from workers and select pivot
-    // val partition = selectPivots(collectSamples())
-    // TODO: Iterate clientLayers and send partition datas
-  } 
-
-  /// Below is just a example. please make List of clientLayers from Config
-  def clientLayers: List[Layer[Throwable,WorkerServiceClient]] = List(
-    WorkerServiceClient.live(
-      ZManagedChannel(
-        ManagedChannelBuilder.forAddress("localhost", 8080).usePlaintext()
-      )
-    )
-  )
+  }
   
-  /*def collectSample(offset: BigInt, client: Layer[Throwable, WorkerServiceClient]): IO[Throwable, List[String]] =
+  def collectSample(client: Layer[Throwable, WorkerServiceClient]): ZIO[WorkerServiceClient, Throwable, Pivots] =
     ZIO.serviceWithZIO[WorkerServiceClient] { workerServiceClient =>
       workerServiceClient.getSamples(SampleRequest(offset))
-  }*/
-
-  /*def selectPivots(pivotCandicateList: List[String], workerDataList: List[WorkerData]): Pivots = {
-    val totalStorageSize = workerDataList.map(_.storageSize).sum
-
-    val pivotIndices = workerDataList.scanLeft(BigInt(0)) { (acc, worker) =>
-      acc + (worker.storageSize * pivotCandicateList.size) / totalStorageSize
-    }.tail
-
-    val distinctPivots = pivotIndices.map(idx => pivotCandicateList(idx.toInt)).distinct
-    
-    Pivots(pivots = distinctPivots)
-  }*/
+  }
 
   def sendPartitionToWorker(client: Layer[Throwable, WorkerServiceClient], pivots: Pivots): Task[Unit] = ???
 }
