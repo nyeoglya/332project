@@ -3,24 +3,29 @@ ThisBuild / organization := "kr.ac.postech.green"
 ThisBuild / organizationName := "green"
 ThisBuild / scalaVersion := "2.13.15"
 
-PB.targets in Compile := Seq(
-  scalapb.gen(grpc = true) -> (sourceManaged in Compile).value / "scalapb",
-  scalapb.zio_grpc.ZioCodeGenerator -> (sourceManaged in Compile).value / "scalapb"
+val grpcVersion = "1.64.0"
+val zioVersion = "2.1.12"
+
+Compile / PB.targets := Seq(
+  scalapb.gen(grpc = true) -> (Compile / sourceManaged).value / "scalapb",
+  scalapb.zio_grpc.ZioCodeGenerator -> (Compile / sourceManaged).value / "scalapb"
 )
 
 lazy val commonDependencies = Seq(
-  "dev.zio" %% "zio" % "2.1.11",
-  "dev.zio" %% "zio-streams" % "2.1.11",
-  "org.rogach" %% "scallop" % "5.1.0",
+  "io.grpc" % "grpc-netty" % grpcVersion,
+  "io.grpc" % "grpc-protobuf" % grpcVersion,
+  "io.grpc" % "grpc-stub" % grpcVersion,
+  "dev.zio" %% "zio" % zioVersion,
+  "dev.zio" %% "zio-streams" % zioVersion,
+  "dev.zio" %% "zio-test" % zioVersion % Test,
+  "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
+  "dev.zio" %% "zio-test-junit" % zioVersion % Test,
   "junit" % "junit" % "4.10" % Test,
+  "com.github.sbt" % "junit-interface" % "0.13.3" % Test,
   "org.scalatest" %% "scalatest" % "3.0.8" % Test,
   "org.rogach" %% "scallop" % "5.1.0",
-  "io.grpc" % "grpc-netty" % "1.39.0",
+  "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf",
   "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion,
-  "dev.zio" %% "zio-test" % "2.1.11" % Test,
-  "dev.zio" %% "zio-test-sbt" % "2.1.1" % Test,
-  "dev.zio" %% "zio-test-junit" % "2.1.11" % Test,
-  "com.github.sbt" % "junit-interface" % "0.13.3" % Test
 )
 
 lazy val workerDependencies = Seq(
@@ -39,11 +44,17 @@ lazy val global = project
     worker,
     master
   )
+  .settings(
+  )
 
 lazy val common = (project in file("common"))
   .settings(
     name := "common",
     libraryDependencies ++= commonDependencies,
+    Compile / PB.targets := Seq(
+      scalapb.gen(grpc = true) -> (Compile / sourceManaged).value / "scalapb",
+      scalapb.zio_grpc.ZioCodeGenerator -> (Compile / sourceManaged).value / "scalapb"
+    )
   )
   .disablePlugins(AssemblyPlugin)
 
@@ -53,6 +64,10 @@ lazy val worker = (project in file("worker"))
     libraryDependencies ++= commonDependencies ++ workerDependencies,
     assembly / mainClass := Some("Main"),
     assembly / assemblyJarName := s"${name.value}.jar",
+    Compile / PB.targets := Seq(
+      scalapb.gen(grpc = true) -> (Compile / sourceManaged).value / "scalapb",
+      scalapb.zio_grpc.ZioCodeGenerator -> (Compile / sourceManaged).value / "scalapb"
+    )
   )
   .dependsOn(common)
 
@@ -62,6 +77,10 @@ lazy val master = (project in file("master"))
     libraryDependencies ++= commonDependencies ++ masterDependencies,
     assembly / mainClass := Some("Main"),
     assembly / assemblyJarName := s"${name.value}.jar",
+    Compile / PB.targets := Seq(
+      scalapb.gen(grpc = true) -> (Compile / sourceManaged).value / "scalapb",
+      scalapb.zio_grpc.ZioCodeGenerator -> (Compile / sourceManaged).value / "scalapb"
+    )
   )
   .dependsOn(common)
 

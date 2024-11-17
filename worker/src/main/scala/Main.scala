@@ -3,37 +3,110 @@ package worker
 import org.rogach.scallop._
 import zio._
 import zio.stream._
-
+import scalapb.zio_grpc.{ServerMain, ServiceList}
 import java.io.{File, PrintWriter}
 import scala.io.Source
+import io.grpc.StatusException
+import io.grpc.ServerBuilder
+import io.grpc.protobuf.services.ProtoReflectionService
+import proto.common.{SampleRequest, Entity}
+import proto.common.DataResponse
+import proto.common.SortResponse
+import proto.common.Partition
+import proto.common.ZioCommon.WorkerService
+import scalapb.zio_grpc
 import java.nio.file.Files
-import common.Entity
-
 import scala.collection.mutable.PriorityQueue
 import scala.language.postfixOps
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
-  val masterAddress = trailArg[String](required = true, descr = "Master address (e.g., 192.168.0.1:8080)")
   val inputDirectories = opt[List[String]](name = "I", descr = "Input directories", default = Some(List()))
   val outputDirectory = opt[String](name = "O", descr = "Output directory", default = Some(""))
   verify()
 }
 
-/**
- * this object enables test without network service
- * by setting this before entering Main App(before Main.main(args)),
- * we can transform data to Worker manually
- */
-object Mode {
-  /**
-   * "FuncTest", "WithoutNetwork", "Real"
-   */
-  var testMode = "WithoutNetworkTest"
-  var machineNumber = 1
-  var pivotList = List("")
-  var shuffledStreams = List.empty[Stream[Exception, Entity]]
+object Main extends ZIOAppDefault {
+  def port: Int = 8980
 
-  def setMode() = ()
+  def run: ZIO[Environment with ZIOAppArgs with Scope,Any,Any] = (for {
+    _ <- zio.Console.printLine(s"Worker is running on port ${port}. Press Ctrl-C to stop.")
+    result <- serverLive.launch.exitCode
+  } yield result).provideSomeLayer[ZIOAppArgs](
+    ZLayer.fromZIO( for {
+      args <- getArgs
+      config = new Config(args)
+      _ = config.inputDirectories.toOption.foreach(dirs => println(s"Input Directories: ${dirs.mkString(", ")}"))
+      _ = config.outputDirectory.toOption.foreach(dir => println(s"Output Directory: $dir"))
+    } yield config
+    ) >>> ZLayer.fromFunction {config: Config => new WorkerLogic(config)}
+ )
+
+  def builder = ServerBuilder
+    .forPort(port)
+    .addService(ProtoReflectionService.newInstance())
+
+  def serverLive: ZLayer[WorkerServiceLogic, Throwable, zio_grpc.Server] = for {
+      service <- ZLayer.service[WorkerServiceLogic]
+      result <- zio_grpc.ServerLayer.fromServiceList(builder, ServiceList.add(new ServiceImpl(service.get))) 
+  } yield result
+
+  class ServiceImpl(service: WorkerServiceLogic) extends WorkerService {
+    def getSamples(request: SampleRequest): zio.stream.Stream[StatusException,Entity] = {
+      ???
+    }
+
+    def sendData(request: Stream[StatusException,Entity]): IO[StatusException,DataResponse] = {
+      ???
+    }
+
+    def startSort(request: Partition): IO[StatusException,SortResponse] = {
+      ???
+    }
+  }
+}
+
+trait WorkerServiceLogic {
+  def inputEntities: Stream[Throwable, Entity]
+
+  /** Save Entities to file system
+    * 
+    *
+    * @param data Stream of Entity
+    */
+  def saveEntities(data: Stream[Throwable, Entity])
+
+  /** Get Stream of sample Entity datas
+    * 
+    * @return Stream of sample Entity to send
+    */
+  def getSampleStream(size: Integer): Stream[Throwable, Entity]
+
+  /** Get Stream of Entity to send other workers
+    *
+    * @param index
+    * @param partition
+    * @return
+    */
+  def getDataStream(index: Integer, partition: Partition): Stream[Throwable, Entity]
+
+  /** Sort multiple Entity Streams
+    *
+    * @param data
+    * @return
+    */
+  def sortStreams(data: List[Stream[StatusException, Entity]]): Stream[Throwable, Entity]
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+class WorkerLogic(config: Config) extends WorkerServiceLogic {
+  // TODO: Read files from storage
+  def inputEntities: Stream[Throwable, Entity] = ???
+  def saveEntities(data: Stream[Throwable,Entity]): Unit = ???
+
+  def getDataStream(index: Integer, partition: Partition): Stream[Throwable,Entity] = ???
+  def getSampleStream(size: Integer): Stream[Throwable,Entity] = ???
+  def sortStreams(data: List[Stream[StatusException,Entity]]): Stream[Throwable,Entity] = ???
 }
 
 /** Worker's Main function
@@ -63,34 +136,23 @@ object Mode {
  *  - [ ] TODO #5 : error handling 추가
  *
  */
-object Main extends App {
+object WorkerCodes extends App {
   val config = new Config(args)
 
-  println(s"Master Address: ${config.masterAddress()}")
   config.inputDirectories.toOption.foreach(dirs => println(s"Input Directories: ${dirs.mkString(", ")}"))
   config.outputDirectory.toOption.foreach(dir => println(s"Output Directory: $dir"))
-
-  Mode.setMode()
-
 
   object PathMaker {
     def sortedSmallFile(filePath : String) : String = {
       val index = filePath.lastIndexOf('/')
-      if(Mode.testMode == "FuncTest")
-        filePath.substring(0, index + 1) + "sorted_" + filePath.substring(index + 1)
-      else
-        config.outputDirectory.toOption.get + "/sorted_" + filePath.substring(index + 1)
+      config.outputDirectory.toOption.get + "/sorted_" + filePath.substring(index + 1)
     }
     def sampleFile(filePath : String) : String = {
       val index = filePath.lastIndexOf('/')
-      if(Mode.testMode == "FuncTest")
-        filePath.substring(0, index + 1) + "sampled_" + filePath.substring(index + 1)
-      else
-        config.outputDirectory.toOption.get + "/sampled_" + filePath.substring(index + 1)
+      config.outputDirectory.toOption.get + "/sampled_" + filePath.substring(index + 1)
     }
     def mergedFile() : String = {
-      if(Mode.testMode == "FuncTest") "src/test/funcTestFiles/output/mergedFile.txt"
-      else config.outputDirectory.toOption.get + "/mergedFile" + machineNumber.toString
+      config.outputDirectory.toOption.get + "/mergedFile" + machineNumber.toString
     }
   }
 
@@ -101,26 +163,13 @@ object Main extends App {
    * @return data of the file read
    */
   def readFile(filePath : String) : List[Entity] = {
-    def readTestFile(filePath : String) : List[Entity] = {
-      val source = Source.fromFile(filePath)
-      val lines = source.getLines().toList
-      source.close()
-      for {
-        line <- lines
-        words = line.split("\\|")
-      } yield Entity(words(0), words(1))
-    }
-    def readRealFile(filePath : String) : List[Entity] = {
-      val source = Source.fromFile(filePath)
-      val lines = source.grouped(100).toList
-      source.close()
-      for {
-        line <- lines
-        (key, value) = line.splitAt(10)
-      } yield Entity(key.mkString, value.mkString)
-    }
-    if(Mode.testMode == "FuncTest") readTestFile(filePath)
-    else readRealFile(filePath)
+    val source = Source.fromFile(filePath)
+    val lines = source.grouped(100).toList
+    source.close()
+    for {
+      line <- lines
+      (key, value) = line.splitAt(10)
+    } yield Entity(key.mkString, value.mkString)
   }
 
   /** write data to new file
@@ -130,34 +179,16 @@ object Main extends App {
    * @param data a list of entity to write
    */
   def writeFile(filePath : String, data : List[Entity]) : Unit = {
-    def writeTestFile(filePath : String, data : List[Entity]) : Unit = {
-      val file = new File(filePath)
-      val writer = new PrintWriter(file)
-      try {
-        data.foreach(entity => {
-          writer.write(entity.head)
-          writer.write("|")
-          writer.write(entity.body)
-          writer.write("\n")
-        })
-      } finally {
-        writer.close()
-      }
+    val file = new File(filePath)
+    val writer = new PrintWriter(file)
+    try {
+      data.foreach(entity => {
+        writer.write(entity.head)
+        writer.write(entity.body)
+      })
+    } finally {
+      writer.close()
     }
-    def writeRealFile(filePath : String, data : List[Entity]) : Unit = {
-      val file = new File(filePath)
-      val writer = new PrintWriter(file)
-      try {
-        data.foreach(entity => {
-          writer.write(entity.head)
-          writer.write(entity.body)
-        })
-      } finally {
-        writer.close()
-      }
-    }
-    if(Mode.testMode == "FuncTest") writeTestFile(filePath, data)
-    else writeRealFile(filePath, data)
   }
 
   /** write data to new file through stream
@@ -170,58 +201,23 @@ object Main extends App {
    * @param data a list of entity to write(huge)
    */
   def writeFileViaStream(filePath : String, data : Stream[Exception, Entity]) : Unit = {
-    def writeTestFileViaStream(filePath : String, data : Stream[Exception, Entity]) : Unit = {
-      val file = new File(filePath)
-      val writer = new PrintWriter(file)
-      try {
-        Unsafe unsafe {
-          implicit unsafe =>
-            Runtime.default.unsafe.run{
-              data.runForeach(entity => {
-                writer.write(entity.head)
-                writer.write("|")
-                writer.write(entity.body)
-                writer.write("\n")
-                ZIO.succeed(())
-              })
-            }
-        }
-      } finally {
-        writer.close()
+    val file = new File(filePath)
+    val writer = new PrintWriter(file)
+    try {
+      Unsafe unsafe {
+        implicit unsafe =>
+          Runtime.default.unsafe.run{
+            data.runForeach(entity => {
+              writer.write(entity.head)
+              writer.write(entity.body)
+              ZIO.succeed(())
+            })
+          }
       }
+    } finally {
+      writer.close()
     }
-    def writeRealFileViaStream(filePath : String, data : Stream[Exception, Entity]) : Unit = {
-      val file = new File(filePath)
-      val writer = new PrintWriter(file)
-      try {
-        Unsafe unsafe {
-          implicit unsafe =>
-            Runtime.default.unsafe.run{
-              data.runForeach(entity => {
-                writer.write(entity.head)
-                writer.write(entity.body)
-                ZIO.succeed(())
-              })
-            }
-        }
-      } finally {
-        writer.close()
-      }
-    }
-    if(Mode.testMode == "FuncTest") writeTestFileViaStream(filePath, data)
-    else writeRealFileViaStream(filePath, data)
   }
-
-  /** this function extract entity from ZIO value
-   *
-   * @param zio original ZIO value
-   * @return entity that had been in ZIO
-   */
-  def zio2entity(zio : ZIO[Any, Exception, Entity]) : Entity =
-    Unsafe unsafe {
-      implicit unsafe =>
-        Runtime.default.unsafe.run(zio).getOrThrow()
-    }
 
   /** this function literally sort small File
    *  and save sorted data in somewhere and return that path
@@ -281,6 +277,17 @@ object Main extends App {
     splitUsingPivots(data, pivots).map(entityList => ZStream.fromIterable(entityList))
   }
 
+  /** this function extract entity from ZIO value
+   *
+   * @param zio original ZIO value
+   * @return entity that had been in ZIO
+   */
+  def zio2entity(zio : ZIO[Any, Exception, Entity]) : Entity =
+    Unsafe unsafe {
+      implicit unsafe =>
+        Runtime.default.unsafe.run(zio).getOrThrow()
+    }
+
   /** this function merge list of streams into a single sorted stream
    *  all streams in input want to go same worker so we'll make them one
    *  using priorityQueue, we can efficiently merge streams.
@@ -324,13 +331,9 @@ object Main extends App {
     filePath
   }
 
-  val machineNumber : Int =
-    if(Mode.testMode == "WithoutNetworkTest") Mode.machineNumber
-    else 1
+  val machineNumber : Int = 1
   val numberOfFiles : Int = 1
-  val pivotList :List[String] =
-    if(Mode.testMode == "WithoutNetworkTest") Mode.pivotList
-    else List("")
+  val pivotList :List[String] = List("")
   val workerIpList : List[String] = List("")
   val sampleOffset : Int = 100
 
@@ -380,10 +383,7 @@ object Main extends App {
     toWorkerStreams.map(toWorkerN => mergeBeforeShuffle(toWorkerN))
 
   // wait until receive all stream from other workers
-
-  val shuffledStreams =
-    if(Mode.testMode == "WithoutNetworkTest") Mode.shuffledStreams
-    else List(ZStream.succeed(Entity("","")))
+  val shuffledStreams = List(ZStream.succeed(Entity("","")))
 
 
   val mergedFilePath : String = mergeAfterShuffle(shuffledStreams)
