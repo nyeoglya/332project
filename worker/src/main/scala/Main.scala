@@ -16,7 +16,7 @@ import scalapb.zio_grpc
 import java.nio.file.Files
 import scala.collection.mutable.PriorityQueue
 import scala.language.postfixOps
-import proto.common.SortRequest
+import proto.common.ShuffleRequest
 import proto.common.ZioCommon.MasterServiceClient
 import io.grpc.ManagedChannelBuilder
 import proto.common.WorkerData
@@ -77,7 +77,7 @@ object Main extends ZIOAppDefault {
 
   class ServiceImpl(service: WorkerServiceLogic) extends WorkerService {
     def getSamples(request: SampleRequest): IO[StatusException,Pivots] = ???
-    def startSort(request: SortRequest): IO[StatusException,SortResponse] = ???
+    def startShuffle(request: ShuffleRequest): IO[StatusException,SortResponse] = ???
     def sendData(request: Stream[StatusException,Entity]): IO[StatusException,DataResponse] = ???
   }
 }
@@ -221,7 +221,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     makeMergeStream(partitionStreams.map(_.drop(1)), ZStream.empty)
   }
 
-  def mergeAfterShuffle(workerStreams : List[Stream[Exception, Entity]]) : Stream[Exception, Entity] = {
+  def mergeAfterShuffle(workerStreams : List[Stream[Throwable, Entity]]) : Stream[Throwable, Entity] = {
     mergeBeforeShuffle(workerStreams)
   }
 
@@ -260,7 +260,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
 
   def getFileSize(): Int = originalSmallFilePaths.map(path => Files.size(Paths.get(path))).sum.toInt
   def getDataStream(partition: Pivots): List[Stream[Throwable,Entity]] = {
-    val partitionStreams : List[List[Stream[Exception, Entity]]] =
+    val partitionStreams : List[List[Stream[Throwable, Entity]]] =
       sortedSmallFilePaths.map(path => splitFileIntoPartitionStreams(path, partition.pivots.toList))
     val toWorkerStreams = for {
       n <- (0 to partition.pivots.length).toList
