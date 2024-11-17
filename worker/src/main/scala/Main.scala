@@ -12,12 +12,13 @@ import io.grpc.protobuf.services.ProtoReflectionService
 import proto.common.{SampleRequest, Entity}
 import proto.common.DataResponse
 import proto.common.SortResponse
-import proto.common.Partition
+import proto.common.Pivots
 import proto.common.ZioCommon.WorkerService
 import scalapb.zio_grpc
 import java.nio.file.Files
 import scala.collection.mutable.PriorityQueue
 import scala.language.postfixOps
+import proto.common.SortRequest
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val inputDirectories = opt[List[String]](name = "I", descr = "Input directories", default = Some(List()))
@@ -35,6 +36,7 @@ object Main extends ZIOAppDefault {
     ZLayer.fromZIO( for {
       args <- getArgs
       config = new Config(args)
+      // TODO: Master에 요청 보내기
       _ = config.inputDirectories.toOption.foreach(dirs => println(s"Input Directories: ${dirs.mkString(", ")}"))
       _ = config.outputDirectory.toOption.foreach(dir => println(s"Output Directory: $dir"))
     } yield config
@@ -51,22 +53,20 @@ object Main extends ZIOAppDefault {
   } yield result
 
   class ServiceImpl(service: WorkerServiceLogic) extends WorkerService {
-    def getSamples(request: SampleRequest): zio.stream.Stream[StatusException,Entity] = {
-      ???
-    }
-
-    def sendData(request: Stream[StatusException,Entity]): IO[StatusException,DataResponse] = {
-      ???
-    }
-
-    def startSort(request: Partition): IO[StatusException,SortResponse] = {
-      ???
-    }
+    def getSamples(request: SampleRequest): IO[StatusException,Pivots] = ???
+    def startSort(request: SortRequest): IO[StatusException,SortResponse] = ???
+    def sendData(request: Stream[StatusException,Entity]): IO[StatusException,DataResponse] = ???
   }
 }
 
 trait WorkerServiceLogic {
   def inputEntities: Stream[Throwable, Entity]
+
+  /** Get whole file size of worker
+    *
+    * @return Int of bytes of file size
+    */
+  def getFileSize(): Integer
 
   /** Save Entities to file system
     * 
@@ -79,7 +79,7 @@ trait WorkerServiceLogic {
     * 
     * @return Stream of sample Entity to send
     */
-  def getSampleStream(size: Integer): Stream[Throwable, Entity]
+  def getSampleStream(offset: Integer, size: Integer): Stream[Throwable, Entity]
 
   /** Get Stream of Entity to send other workers
     *
@@ -87,7 +87,7 @@ trait WorkerServiceLogic {
     * @param partition
     * @return
     */
-  def getDataStream(index: Integer, partition: Partition): Stream[Throwable, Entity]
+  def getDataStream(index: Integer, partition: Pivots): Stream[Throwable, Entity]
 
   /** Sort multiple Entity Streams
     *
@@ -104,8 +104,9 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   def inputEntities: Stream[Throwable, Entity] = ???
   def saveEntities(data: Stream[Throwable,Entity]): Unit = ???
 
-  def getDataStream(index: Integer, partition: Partition): Stream[Throwable,Entity] = ???
-  def getSampleStream(size: Integer): Stream[Throwable,Entity] = ???
+  def getFileSize(): Integer = ???
+  def getDataStream(index: Integer, partition: Pivots): Stream[Throwable,Entity] = ???
+  def getSampleStream(offset: Integer, size: Integer): Stream[Throwable,Entity] = ???
   def sortStreams(data: List[Stream[StatusException,Entity]]): Stream[Throwable,Entity] = ???
 }
 

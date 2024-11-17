@@ -9,7 +9,7 @@ import scalapb.zio_grpc.ZManagedChannel
 import io.grpc.ManagedChannelBuilder
 import proto.common.ZioCommon.WorkerServiceClient
 import proto.common.Entity
-import proto.common.Partition
+import proto.common.Pivots
 
 case class WorkerData(workerIP: String, storageSize: BigInt)
 
@@ -21,7 +21,7 @@ class Config(args: Seq[String]) extends ScallopConf(args) {
 trait MasterServiceLogic {
   def clientLayers: List[Layer[Throwable, WorkerServiceClient]]
   def collectSamples(): List[Stream[Throwable, Entity]]
-  def selectPivots(samples: List[Stream[Throwable, Entity]]): Partition
+  def selectPivots(samples: List[Stream[Throwable, Entity]]): Pivots
 
   def run() = {
     // TODO: Collect samples from workers and select pivot
@@ -60,6 +60,6 @@ class MasterLogic(config: Config) extends MasterServiceLogic {
     )
   )
   def collectSamples(): List[Stream[Throwable,Entity]] = ???
-  def selectPivots(samples: List[Stream[Throwable,Entity]]): Partition = ???
+  def selectPivots(samples: List[Stream[Throwable,Entity]]): Pivots = ???
 }
 
