@@ -138,6 +138,12 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     }
   }
 
+  def zio2entity(zio : ZIO[Any, Exception, Entity]) : Entity =
+    Unsafe unsafe {
+      implicit unsafe =>
+        Runtime.default.unsafe.run(zio).getOrThrow()
+    }
+
   def readFile(filePath : String) : List[Entity] = {
     val source = Source.fromFile(filePath)
     val lines = source.grouped(100).toList
@@ -180,6 +186,17 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
 
   def sampleFilesToSampleStream(filePaths : List[String]) : List[String] = {
     filePaths.flatMap(path => readFile(path)).map(entity => entity.head)
+  }
+
+  def splitFileIntoPartitionStreams(filePath : String, pivots : List[String]) : List[Stream[Exception, Entity]] = {
+    assert(pivots.nonEmpty)
+    val data = readFile(filePath)
+    def splitUsingPivots(data : List[Entity], pivots: List[String]) : List[List[Entity]] = pivots match {
+      case Nil => List(data)
+      case pivot::pivots =>
+        data.takeWhile(entity => entity.head < pivot) :: splitUsingPivots(data.dropWhile(entity => entity.head < pivot), pivots)
+    }
+    splitUsingPivots(data, pivots).map(entityList => ZStream.fromIterable(entityList))
   }
 
   def mergeBeforeShuffle(partitionStreams : List[Stream[Exception, Entity]]) : Stream[Exception, Entity] = {
