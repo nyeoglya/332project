@@ -18,6 +18,7 @@ import scala.language.postfixOps
 import proto.common.SortRequest
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
+  val masterAddress = trailArg[String](required = true, descr = "Mater address (e.g. 192.168.0.1:8000)", default = Some("localhost:8080"))
   val inputDirectories = opt[List[String]](name = "I", descr = "Input directories", default = Some(List()))
   val outputDirectory = opt[String](name = "O", descr = "Output directory", default = Some(""))
   verify()
@@ -33,9 +34,12 @@ object Main extends ZIOAppDefault {
     ZLayer.fromZIO( for {
       args <- getArgs
       config = new Config(args)
-      // TODO: Master에 요청 보내기
+      _ <- zio.Console.printLine(s" Master Address: ${config.masterAddress.toOption.get}")
       _ = config.inputDirectories.toOption.foreach(dirs => println(s"Input Directories: ${dirs.mkString(", ")}"))
       _ = config.outputDirectory.toOption.foreach(dir => println(s"Output Directory: $dir"))
+
+      // TODO: Master에 요청 보내기
+
     } yield config
     ) >>> ZLayer.fromFunction {config: Config => new WorkerLogic(config)}
  )
