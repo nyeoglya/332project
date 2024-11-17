@@ -15,23 +15,27 @@ import io.grpc.ServerBuilder
 import io.grpc.protobuf.services.ProtoReflectionService
 import proto.common.ZioCommon.MasterService
 import io.grpc.StatusException
-import proto.common.{WorkerDataRequest, WorkerDataResponse}
-
-case class WorkerData(workerIP: String, storageSize: BigInt)
+import proto.common.{WorkerData, WorkerDataResponse}
+import common.AddressParser
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
-  val workerNum = trailArg[Int](required = true, descr = "Number of workers")
+  val workerNum = trailArg[Int](required = true, descr = "Number of workers", default = Some(1))
   verify()
 }
 
 object Main extends ZIOAppDefault {
   def port: Int = 7080
 
-  override def run: ZIO[Environment with ZIOAppArgs with Scope,Any,Any] = for {
-    args <- getArgs
-    config = new Config(args)
-    result = new MasterLogic(config).run()
-  } yield result
+  override def run: ZIO[Environment with ZIOAppArgs with Scope,Any,Any] = (for {
+    _ <- zio.Console.printLine(s"Master is running on port ${port}")
+    result <- serverLive.launch.exitCode
+  } yield result).provideSomeLayer[ZIOAppArgs](
+    ZLayer.fromZIO( for {
+        args <- getArgs
+        config = new Config(args)
+      } yield config
+    ) >>> ZLayer.fromFunction {config: Config => new MasterLogic(config)}
+  )
 
   def builder = ServerBuilder
     .forPort(port)
@@ -43,31 +47,45 @@ object Main extends ZIOAppDefault {
   } yield result
 
   class ServiceImpl(service: MasterLogic) extends MasterService {
-    def sendWorkerData(request: WorkerDataRequest): IO[StatusException,WorkerDataResponse] = ???
+    def sendWorkerData(request: WorkerData): IO[StatusException,WorkerDataResponse] = {
+      service.addClient(request.workerAddress, request.fileSize)
+      ZIO.succeed(WorkerDataResponse())
+    }
   }
 }
 
 ////////////////////////////////////////////////////////////////
 
 class MasterLogic(config: Config) {
-  var clients: List[Layer[Throwable, WorkerServiceClient]] = List()
+  case class Client(
+    val client: Layer[Throwable, WorkerServiceClient],
+    val size: BigInt
+  )
+  var clients: List[Client] = List()
+
   lazy val offset = ???
   lazy val workerDataList: List[WorkerData] = ???
 
-  def addClient(clientAddress: String): Boolean = {
-    clients = clients :+ WorkerServiceClient.live(
+  /** Add new client connection to MasterLogic
+    *
+    * @param clientAddress address of client
+    */
+  def addClient(clientAddress: String, clientSize: BigInt) {
+    println(s"New client[${clients.size}] attached: ${clientAddress}, Size: ${clientSize} Bytes")
+    val address = AddressParser.parse(clientAddress).get
+    clients = clients :+ Client(WorkerServiceClient.live(
       ZManagedChannel(
-        ManagedChannelBuilder.forAddress(clientAddress, 8080).usePlaintext()
+        ManagedChannelBuilder.forAddress(address._1, address._2).usePlaintext()
       )
-    )
-    
-    return (clients.size == config.workerNum.toOption.get)
+    ), clientSize)
+    if (clients.size == config.workerNum.toOption.get) this.run()
   }
 
   def collectSamples(): List[Stream[Throwable,Entity]] = ???
   def selectPivots(samples: List[Stream[Throwable,Entity]]): Pivots = ???
 
   def run() = {
+    println("Started!")
     // TODO: Collect samples from workers and select pivot
     // val partition = selectPivots(collectSamples())
     // TODO: Iterate clientLayers and send partition datas
@@ -82,12 +100,12 @@ class MasterLogic(config: Config) {
     )
   )
   
-  def collectSample(offset: BigInt, client: Layer[Throwable, WorkerServiceClient]): List[String] =
+  /*def collectSample(offset: BigInt, client: Layer[Throwable, WorkerServiceClient]): IO[Throwable, List[String]] =
     ZIO.serviceWithZIO[WorkerServiceClient] { workerServiceClient =>
       workerServiceClient.getSamples(SampleRequest(offset))
-  }
+  }*/
 
-  def selectPivots(pivotCandicateList: List[String], workerDataList: List[WorkerData]): Pivots = {
+  /*def selectPivots(pivotCandicateList: List[String], workerDataList: List[WorkerData]): Pivots = {
     val totalStorageSize = workerDataList.map(_.storageSize).sum
 
     val pivotIndices = workerDataList.scanLeft(BigInt(0)) { (acc, worker) =>
@@ -97,7 +115,7 @@ class MasterLogic(config: Config) {
     val distinctPivots = pivotIndices.map(idx => pivotCandicateList(idx.toInt)).distinct
     
     Pivots(pivots = distinctPivots)
-  }
+  }*/
 
   def sendPartitionToWorker(client: Layer[Throwable, WorkerServiceClient], pivots: Pivots): Task[Unit] = ???
 }

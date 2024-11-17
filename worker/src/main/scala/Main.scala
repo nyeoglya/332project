@@ -16,33 +16,54 @@ import java.nio.file.Files
 import scala.collection.mutable.PriorityQueue
 import scala.language.postfixOps
 import proto.common.SortRequest
+import proto.common.ZioCommon.MasterServiceClient
+import io.grpc.ManagedChannelBuilder
+import proto.common.WorkerData
+import proto.common.WorkerDataResponse
+import common.AddressParser
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
-  val masterAddress = trailArg[String](required = true, descr = "Mater address (e.g. 192.168.0.1:8000)", default = Some("localhost:8080"))
+  val masterAddress = trailArg[String](required = true, descr = "Mater address (e.g. 192.168.0.1:8000)", default = Some("127.0.0.1"))
+  val port = opt[Int](name = "P", descr = "Worker server port", default = Some(8080))
   val inputDirectories = opt[List[String]](name = "I", descr = "Input directories", default = Some(List()))
   val outputDirectory = opt[String](name = "O", descr = "Output directory", default = Some(""))
   verify()
 }
 
 object Main extends ZIOAppDefault {
-  def port: Int = 8980
+  var port = 8080
 
-  def run: ZIO[Environment with ZIOAppArgs with Scope,Any,Any] = (for {
-    _ <- zio.Console.printLine(s"Worker is running on port ${port}. Press Ctrl-C to stop.")
-    result <- serverLive.launch.exitCode
-  } yield result).provideSomeLayer[ZIOAppArgs](
-    ZLayer.fromZIO( for {
-      args <- getArgs
-      config = new Config(args)
-      _ <- zio.Console.printLine(s" Master Address: ${config.masterAddress.toOption.get}")
-      _ = config.inputDirectories.toOption.foreach(dirs => println(s"Input Directories: ${dirs.mkString(", ")}"))
-      _ = config.outputDirectory.toOption.foreach(dir => println(s"Output Directory: $dir"))
+  def run: ZIO[Environment with ZIOAppArgs with Scope,Any,Any] = { 
+    (for {
+      _ <- sendDataToMaster
+      result <- serverLive.launch.exitCode
+    } yield result).provideSomeLayer[ZIOAppArgs](
+      ZLayer.fromZIO( for {
+        args <- getArgs
+        config = new Config(args)
+        _ <- zio.Console.printLine(s" Master Address: ${config.masterAddress.toOption.get}")
+        _ = config.inputDirectories.toOption.foreach(dirs => println(s"Input Directories: ${dirs.mkString(", ")}"))
+        _ = config.outputDirectory.toOption.foreach(dir => println(s"Output Directory: $dir"))
+        _ <- zio.Console.printLine(s"Worker is running on port ${config.port.toOption.get}. Press Ctrl-C to stop.")
+        _ = (port = {config.port.toOption.get})
+      } yield config
+    ) >>> ZLayer.fromFunction {config: Config => new WorkerLogic(config)} ++ masterClientLayer
+  )}
 
-      // TODO: Master에 요청 보내기
+  val masterClientLayer: ZLayer[Config, Throwable, MasterServiceClient] = for {
+    config <- ZLayer.service[Config]
+    address <- ZLayer.fromZIO(AddressParser.parseZIO(config.get.masterAddress.toOption.get))
+    layer <- MasterServiceClient.live(
+        zio_grpc.ZManagedChannel(
+          ManagedChannelBuilder.forAddress(address.get._1, address.get._2).usePlaintext()
+        )
+    )
+  } yield layer
 
-    } yield config
-    ) >>> ZLayer.fromFunction {config: Config => new WorkerLogic(config)}
- )
+  val sendDataToMaster: ZIO[MasterServiceClient with WorkerServiceLogic, Throwable, WorkerDataResponse] = for {
+    worker <- ZIO.service[WorkerServiceLogic]
+    result <- MasterServiceClient.sendWorkerData(WorkerData(worker.getFileSize, s"127.0.0.1:${port}"))
+  } yield result
 
   def builder = ServerBuilder
     .forPort(port)
@@ -67,7 +88,7 @@ trait WorkerServiceLogic {
     *
     * @return Int of bytes of file size
     */
-  def getFileSize(): Integer
+  def getFileSize(): Int
 
   /** Save Entities to file system
     * 
@@ -105,7 +126,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   def inputEntities: Stream[Throwable, Entity] = ???
   def saveEntities(data: Stream[Throwable,Entity]): Unit = ???
 
-  def getFileSize(): Integer = ???
+  def getFileSize(): Int = 5050
   def getDataStream(partition: Pivots): List[Stream[Throwable,Entity]] = ???
   def getSampleStream(offset: Integer, size: Integer): Stream[Throwable,Entity] = ???
   def sortStreams(data: List[Stream[StatusException,Entity]]): Stream[Throwable,Entity] = ???
