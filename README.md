@@ -20,7 +20,7 @@
 
 **Week 4: Create test code** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week4_report.html) / [Discussion1](https://github.com/nyeoglya/332project/discussions/7) / [Image1](https://github.com/nyeoglya/332project/blob/main/report/worker_test_carprefer.png)
 
-**Week 5: Creating physical code and testing the system**
+**Week 5: Creating physical code and testing the system** [Report](https://github.com/nyeoglya/332project/blob/main/report/week5_report.pdf)
 
 **Week 6 (Progress Slides Deadline): Organizing Content, Preparing for Interim Presentation**
 
