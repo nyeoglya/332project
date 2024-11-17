@@ -11,7 +11,7 @@ import proto.common.ZioCommon.WorkerServiceClient
 import proto.common.Entity
 import proto.common.Pivots
 
-case class WorkerData(workerIP: String, storageSize: BigInt)
+case class WorkerData(workerIP: String, dataCount: BigInt)
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val workerNum = trailArg[Int](required = true, descr = "Number of workers")
@@ -36,10 +36,17 @@ class MasterLogic(config: Config) extends MasterServiceLogic {
     // TODO: Collect samples from workers and select pivot
     // val partition = selectPivots(collectSamples())
     // TODO: Iterate clientLayers and send partition datas
-  } 
+    val pivotCandicateList: ZIO[Any, Throwable, List[Pivots]] = ZIO.foreach(clientLayers) { layer =>
+      collectSample(offset, layer).provideLayer(layer).map(pivots => pivots)
+    }
+
+    val selectedPivots = selectPivots(pivotCandicateList)
+
+    // TODO: selectedPivots를 모든 Worker에 전송한다.
+  }
 
   /// Below is just a example. please make List of clientLayers from Config
-  def clientLayers: List[Layer[Throwable,WorkerServiceClient]] = List(
+  def clientLayers: List[Layer[Throwable, WorkerServiceClient]] = List(
     WorkerServiceClient.live(
       ZManagedChannel(
         ManagedChannelBuilder.forAddress("localhost", 8080).usePlaintext()
@@ -47,21 +54,27 @@ class MasterLogic(config: Config) extends MasterServiceLogic {
     )
   )
   
-  def collectSample(offset: BigInt, client: Layer[Throwable, WorkerServiceClient]): List[String] =
+  def collectSample(client: Layer[Throwable, WorkerServiceClient]): ZIO[WorkerServiceClient, Throwable, Pivots] =
     ZIO.serviceWithZIO[WorkerServiceClient] { workerServiceClient =>
       workerServiceClient.getSamples(SampleRequest(offset))
   }
 
-  def selectPivots(pivotCandicateList: List[String], workerDataList: List[WorkerData]): Pivots = {
-    val totalStorageSize = workerDataList.map(_.storageSize).sum
+  def selectPivots(pivotCandicateZIOList: ZIO[Any, Throwable, List[Pivots]]): ZIO[Any, Throwable, Pivots] = {
+    val pivotCandicateList: ZIO[Any, Throwable, List[String]] = pivotsList.map { pivots =>
+      pivots.flatMap(_.pivots)
+    }
+
+    val pivotCandicateListSize: ZIO[Any, Throwable, Int] = pivotCandicateList.map(_.size)
+    val totalDataCount = workerDataList.map(_.dataCount).sum
 
     val pivotIndices = workerDataList.scanLeft(BigInt(0)) { (acc, worker) =>
-      acc + (worker.storageSize * pivotCandicateList.size) / totalStorageSize
+      acc + pivotCandicateListSize * (worker.dataCount / totalDataCount)
     }.tail
 
-    val distinctPivots = pivotIndices.map(idx => pivotCandicateList(idx.toInt)).distinct
-    
-    Pivots(pivots = distinctPivots)
+    for {
+      pivotList <- pivotCandicateList
+      distinctList = pivotIndices.map(idx => pivotList(idx)).distinct
+    } yield Pivots(pivots = distinctList)
   }
 
   def sendPartitionToWorker(client: Layer[Throwable, WorkerServiceClient], pivots: Pivots): Task[Unit] = ???
