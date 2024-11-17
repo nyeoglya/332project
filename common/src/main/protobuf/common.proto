@@ -8,7 +8,7 @@ service MasterService {
 
 service WorkerService {
 	rpc GetSamples (SampleRequest) returns (Pivots);
-	rpc StartSort (SortRequest) returns (SortResponse);
+	rpc StartShuffle (ShuffleRequest) returns (SortResponse);
 	rpc SendData (stream Entity) returns (DataResponse);
 }
 
@@ -31,7 +31,7 @@ message Pivots {
 	repeated string pivots = 1;
 }
 
-message SortRequest {
+message ShuffleRequest {
 	Pivots pivots = 1;
 	repeated string workerAddresses = 2;
 }
