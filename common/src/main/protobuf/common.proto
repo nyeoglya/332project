@@ -2,14 +2,24 @@ syntax = "proto3";
 
 package proto;
 
+service MasterService {
+	rpc SendWorkerData(WorkerDataRequest) returns (WorkerDataResponse);
+}
+
 service WorkerService {
-	rpc GetSamples (SampleRequest) returns (stream Entity);
-	rpc StartSort (Partition) returns (SortResponse);
+	rpc GetSamples (SampleRequest) returns (Pivots);
+	rpc StartSort (SortRequest) returns (SortResponse);
 	rpc SendData (stream Entity) returns (DataResponse);
 }
 
+message WorkerDataRequest {}
+message WorkerDataResponse {
+	int64 fileSize = 1;
+	string workerAddress = 2;
+}
+
 message SampleRequest {
-	int32 size = 1;
+	int64 offset = 1;
 }
 
 message Entity {
@@ -17,7 +27,16 @@ message Entity {
 	string body = 2;
 }
 
-message Partition {
+message Pivots {
+	repeated string pivots = 1;
+}
+
+message SortRequest {
+	Pivots pivots = 1;
+	repeated string workerAddresses = 2;
+}
+
+message SampleResponse {
 	repeated string pivots = 1;
 }
 
