@@ -3,7 +3,7 @@ syntax = "proto3";
 package proto;
 
 service MasterService {
-	rpc SendWorkerData(WorkerDataRequest) returns (WorkerDataResponse);
+	rpc SendWorkerData(WorkerData) returns (WorkerDataResponse);
 }
 
 service WorkerService {
@@ -12,11 +12,11 @@ service WorkerService {
 	rpc SendData (stream Entity) returns (DataResponse);
 }
 
-message WorkerDataRequest {}
-message WorkerDataResponse {
+message WorkerData {
 	int64 fileSize = 1;
 	string workerAddress = 2;
 }
+message WorkerDataResponse {}
 
 message SampleRequest {
 	int64 offset = 1;
