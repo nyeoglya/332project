@@ -138,7 +138,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     }
   }
 
-  def zio2entity(zio : ZIO[Any, Exception, Entity]) : Entity =
+  def zio2entity(zio : ZIO[Any, Throwable, Entity]) : Entity =
     Unsafe unsafe {
       implicit unsafe =>
         Runtime.default.unsafe.run(zio).getOrThrow()
@@ -188,7 +188,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     filePaths.flatMap(path => readFile(path)).map(entity => entity.head)
   }
 
-  def splitFileIntoPartitionStreams(filePath : String, pivots : List[String]) : List[Stream[Exception, Entity]] = {
+  def splitFileIntoPartitionStreams(filePath : String, pivots : List[String]) : List[Stream[Throwable, Entity]] = {
     assert(pivots.nonEmpty)
     val data = readFile(filePath)
     def splitUsingPivots(data : List[Entity], pivots: List[String]) : List[List[Entity]] = pivots match {
@@ -199,7 +199,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     splitUsingPivots(data, pivots).map(entityList => ZStream.fromIterable(entityList))
   }
 
-  def mergeBeforeShuffle(partitionStreams : List[Stream[Exception, Entity]]) : Stream[Exception, Entity] = {
+  def mergeBeforeShuffle(partitionStreams : List[Stream[Throwable, Entity]]) : Stream[Throwable, Entity] = {
     implicit val entityOrdering : Ordering[(Entity, Int)] = Ordering.by(_._1.head)
     val minHeap : PriorityQueue[(Entity, Int)] = PriorityQueue.empty(entityOrdering.reverse)
     partitionStreams.zipWithIndex foreach {
@@ -208,7 +208,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
         if(head != Entity("", ""))
           minHeap.enqueue((head, index))
     }
-    def makeMergeStream(streams : List[Stream[Exception, Entity]], accStream : Stream[Exception, Entity]) : Stream[Exception, Entity] = {
+    def makeMergeStream(streams : List[Stream[Throwable, Entity]], accStream : Stream[Throwable, Entity]) : Stream[Throwable, Entity] = {
       if(minHeap.isEmpty) accStream
       else {
         val (minEntity, minIndex) = minHeap.dequeue()
@@ -221,11 +221,8 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     makeMergeStream(partitionStreams.map(_.drop(1)), ZStream.empty)
   }
 
-  def mergeAfterShuffle(workerStreams : List[Stream[Exception, Entity]]) : String = {
-    val mergedStream = mergeBeforeShuffle(workerStreams)
-    val filePath = PathMaker.mergedFile()
-    writeFileViaStream(filePath, mergedStream)
-    filePath
+  def mergeAfterShuffle(workerStreams : List[Stream[Exception, Entity]]) : Stream[Exception, Entity] = {
+    mergeBeforeShuffle(workerStreams)
   }
 
   val originalSmallFilePaths : List[String] = {
@@ -239,10 +236,11 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   val sortedSmallFilePaths : List[String] = originalSmallFilePaths.map(path => sortSmallFile(path))
 
   // TODO: Read files from storage
-  def inputEntities: Stream[Throwable, Entity] = originalSmallFilePaths.flatMap(path => ZStream.fromIterable(readFile(path)))
+  def inputEntities: Stream[Throwable, Entity] =
+    ZStream.fromIterable(originalSmallFilePaths).flatMap(path => ZStream.fromIterable(readFile(path)))
 
   def saveEntities(index: Integer, data: Stream[Throwable,Entity]): Unit = {
-    val file = new File(filePath)
+    val file = new File(PathMaker.mergedFile(index))
     val writer = new PrintWriter(file)
     try {
       Unsafe unsafe {
@@ -260,12 +258,12 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     }
   }
 
-  def getFileSize(): Integer = originalSmallFilePaths.map(path => File.size(Paths.get(path))).sum
+  def getFileSize(): Int = originalSmallFilePaths.map(path => Files.size(Paths.get(path))).sum.toInt
   def getDataStream(partition: Pivots): List[Stream[Throwable,Entity]] = {
     val partitionStreams : List[List[Stream[Exception, Entity]]] =
-      sortedSmallFilePaths.map(path => splitFileIntoPartitionStreams(path, pivotList))
+      sortedSmallFilePaths.map(path => splitFileIntoPartitionStreams(path, partition.pivots.toList))
     val toWorkerStreams = for {
-      n <- (0 to pivotList.length).toList
+      n <- (0 to partition.pivots.length).toList
       toN = partitionStreams.map(_(n))
     } yield toN
     toWorkerStreams.map(toWorkerN => mergeBeforeShuffle(toWorkerN))
@@ -304,7 +302,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
  *  - [ ] TODO #5 : error handling 추가
  *
  */
-object WorkerCodes extends App {
+/*object WorkerCodes extends App {
   val config = new Config(args)
 
   config.inputDirectories.toOption.foreach(dirs => println(s"Input Directories: ${dirs.mkString(", ")}"))
@@ -544,4 +542,4 @@ object WorkerCodes extends App {
   val mergedFilePath : String = mergeAfterShuffle(shuffledStreams)
 
   sortedSmallFilePaths.foreach(path => new File(path).delete())
-}
+}*/
