@@ -9,10 +9,7 @@ import scala.io.Source
 import io.grpc.StatusException
 import io.grpc.ServerBuilder
 import io.grpc.protobuf.services.ProtoReflectionService
-import proto.common.{SampleRequest, Entity}
-import proto.common.DataResponse
-import proto.common.SortResponse
-import proto.common.Pivots
+import proto.common.{SampleRequest, Entity, DataResponse, SortResponse, Pivots}
 import proto.common.ZioCommon.WorkerService
 import scalapb.zio_grpc
 import java.nio.file.Files
@@ -87,7 +84,7 @@ trait WorkerServiceLogic {
     * @param partition
     * @return
     */
-  def getDataStream(index: Integer, partition: Pivots): Stream[Throwable, Entity]
+  def getDataStream(partition: Pivots): List[Stream[Throwable, Entity]]
 
   /** Sort multiple Entity Streams
     *
@@ -105,7 +102,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   def saveEntities(data: Stream[Throwable,Entity]): Unit = ???
 
   def getFileSize(): Integer = ???
-  def getDataStream(index: Integer, partition: Pivots): Stream[Throwable,Entity] = ???
+  def getDataStream(partition: Pivots): List[Stream[Throwable,Entity]] = ???
   def getSampleStream(offset: Integer, size: Integer): Stream[Throwable,Entity] = ???
   def sortStreams(data: List[Stream[StatusException,Entity]]): Stream[Throwable,Entity] = ???
 }
