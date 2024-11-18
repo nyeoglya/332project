@@ -23,6 +23,7 @@ import proto.common.WorkerData
 import proto.common.WorkerDataResponse
 import common.AddressParser
 import zio.stream.ZStream.HaltStrategy
+import io.grpc.Status
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val masterAddress = trailArg[String](required = true, descr = "Mater address (e.g. 192.168.0.1:8000)", default = Some("127.0.0.1"))
@@ -82,10 +83,17 @@ object Main extends ZIOAppDefault {
   } yield result
 
   class ServiceImpl(service: WorkerServiceLogic) extends WorkerService {
-    def getSamples(request: SampleRequest): IO[StatusException,Pivots] = ???
+    def getSamples(request: SampleRequest): IO[StatusException,Pivots] = {
+      val result = for {
+        _ <- zio.Console.printLine(s"Sample requested with offset: ${request.offset}")
+        samples = service.getSampleStream(request.offset.toInt, 100)
+        result = Pivots(samples)
+      } yield result
+      result.mapError(e => new StatusException(Status.INTERNAL))
+    }
+
     def startShuffle(request: ShuffleRequest): IO[StatusException,SortResponse] = ???
-    def sendData(request: Stream[StatusException,Entity]): IO[StatusException,DataResponse] = ???
-  }
+    def sendData(request: Stream[StatusException,Entity]): IO[StatusException,DataResponse] = ??? }
 }
 
 trait WorkerServiceLogic {
