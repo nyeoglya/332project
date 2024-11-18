@@ -22,7 +22,7 @@
 
 **Week 5: Creating physical code and testing the system** [Report](https://github.com/nyeoglya/332project/blob/main/report/week5_report.pdf)
 
-**Week 6 (Progress Slides Deadline): Organizing Content, Preparing for Interim Presentation**
+**Week 6 (Progress Slides Deadline): Organizing Content, Preparing for Intermediate Presentation** [Presentation Slides](https://github.com/nyeoglya/332project/blob/main/presentation/)
 
 **Week 7: Project Improvement and Maintenance**
 
