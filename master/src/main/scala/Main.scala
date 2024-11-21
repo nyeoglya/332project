@@ -19,6 +19,7 @@ import io.grpc.StatusException
 import proto.common.{WorkerData, WorkerDataResponse}
 import common.AddressParser
 import proto.common.SampleRequest
+import io.grpc.Status
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val workerNum = trailArg[Int](required = true, descr = "Number of workers", default = Some(1))
@@ -50,8 +51,13 @@ object Main extends ZIOAppDefault {
 
   class ServiceImpl(service: MasterLogic) extends MasterService {
     def sendWorkerData(request: WorkerData): IO[StatusException,WorkerDataResponse] = {
-      service.addClient(request.workerAddress, request.fileSize)
-      ZIO.succeed(WorkerDataResponse())
+      val result = for {
+        addClient <- service.addClient(request.workerAddress, request.fileSize)
+        // TODO: Map addClient
+        result <- ZIO.succeed(WorkerDataResponse())
+      } yield result
+
+      result.mapError(e => new StatusException(Status.INTERNAL))
     }
   }
 }
@@ -68,26 +74,35 @@ class MasterLogic(config: Config) {
     *
     * @param clientAddress address of client
     */
-  def addClient(clientAddress: String, clientSize: BigInt) = {
-    println(s"New client[${clients.size}] attached: ${clientAddress}, Size: ${clientSize} Bytes")
-    val address = AddressParser.parse(clientAddress).get
+  def addClient(workerAddress: String, workerSize: BigInt): IO[Throwable, Any] = {
+    println(s"New worker[${clients.size}] attached: ${workerAddress}, Size: ${workerSize} Bytes")
+    val address = AddressParser.parse(workerAddress).get
     clients = clients :+ WorkerClient(WorkerServiceClient.live(
       ZManagedChannel(
         ManagedChannelBuilder.forAddress(address._1, address._2).usePlaintext()
       )
-    ), clientSize)
-    workerIPList = workerIPList :+ clientAddress
+    ), workerSize)
+    workerIPList = workerIPList :+ workerAddress
+
     if (clients.size == config.workerNum.toOption.get) this.run()
+    else ZIO.succeed(())
   }
 
-  def run() = {
-    val pivotCandicateList: ZIO[Any, Throwable, List[Pivots]] = ZIO.foreachPar(clients.map(_.client)) { layer =>
-      collectSample(layer).provideLayer(layer)
-    }
+  def run(): IO[Throwable, Any] = {
+    println("All worker connected")
 
-    val selectedPivots = selectPivots(pivotCandicateList)
+    for {
+      _ <- zio.Console.printLine("Requests samples to each workers")
+      pivotCandicateList <- ZIO.foreachPar(clients.map(_.client)) { layer =>
+          collectSample(layer).provideLayer(layer)
+        }
+    } yield pivotCandicateList
 
-    clients.foreach(client => sendPartitionToWorker(client.client, selectedPivots))
+    // ZIO는 실제로 사용되는 시점에서 비동기적으로 실행됨
+
+    // val selectedPivots = selectPivots(pivotCandicateList)
+
+    // clients.foreach(client => sendPartitionToWorker(client.client, selectedPivots))
   }
   
   def collectSample(client: Layer[Throwable, WorkerServiceClient]): ZIO[WorkerServiceClient, Throwable, Pivots] =
@@ -95,6 +110,7 @@ class MasterLogic(config: Config) {
       workerServiceClient.getSamples(SampleRequest(offset))
   }
 
+  // TODO: ZIO가 아니라 평범하게 List[Pivots]로 수정 요망. (코드 내부에서 비동기적으로 돌아가는 부분이 없으므로)
   def selectPivots(pivotCandicateZIOList: ZIO[Any, Throwable, List[Pivots]]): ZIO[Any, Throwable, Pivots] = {
     val pivotCandicateList: ZIO[Any, Throwable, List[String]] = pivotCandicateZIOList.map { pivots =>
       pivots.flatMap(_.pivots)

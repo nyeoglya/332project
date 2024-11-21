@@ -22,6 +22,8 @@ import io.grpc.ManagedChannelBuilder
 import proto.common.WorkerData
 import proto.common.WorkerDataResponse
 import common.AddressParser
+import zio.stream.ZStream.HaltStrategy
+import io.grpc.Status
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val masterAddress = trailArg[String](required = true, descr = "Mater address (e.g. 192.168.0.1:8000)", default = Some("127.0.0.1"))
@@ -36,19 +38,24 @@ object Main extends ZIOAppDefault {
 
   def run: ZIO[Environment with ZIOAppArgs with Scope,Any,Any] = { 
     (for {
+      result <- serverLive.launch.exitCode.fork
+      _ <- zio.Console.printLine(s"Worker is running on port ${port}. Press Ctrl-C to stop.")
       _ <- sendDataToMaster
-      result <- serverLive.launch.exitCode
-    } yield result).provideSomeLayer[ZIOAppArgs](
-      ZLayer.fromZIO( for {
-        args <- getArgs
-        config = new Config(args)
-        _ <- zio.Console.printLine(s" Master Address: ${config.masterAddress.toOption.get}")
-        _ = config.inputDirectories.toOption.foreach(dirs => println(s"Input Directories: ${dirs.mkString(", ")}"))
-        _ = config.outputDirectory.toOption.foreach(dir => println(s"Output Directory: $dir"))
-        _ <- zio.Console.printLine(s"Worker is running on port ${config.port.toOption.get}. Press Ctrl-C to stop.")
-        _ = (port = {config.port.toOption.get})
-      } yield config
-    ) >>> ZLayer.fromFunction {config: Config => new WorkerLogic(config)} ++ masterClientLayer
+      result <- result.join
+    } yield result)
+      .provideSomeLayer[ZIOAppArgs](
+        ZLayer.fromZIO( 
+          for {
+            args <- getArgs
+            config = new Config(args)
+            _ <- zio.Console.printLine(s" Master Address: ${config.masterAddress.toOption.get}")
+            _ = config.inputDirectories.toOption.foreach(dirs => println(s"Input Directories: ${dirs.mkString(", ")}"))
+            _ = config.outputDirectory.toOption.foreach(dir => println(s"Output Directory: $dir"))
+            _ = (port = {config.port.toOption.get})
+          } yield config
+        ) 
+      >>> ZLayer.fromFunction {config: Config => new WorkerLogic(config)} 
+      ++ masterClientLayer
   )}
 
   val masterClientLayer: ZLayer[Config, Throwable, MasterServiceClient] = for {
@@ -76,10 +83,17 @@ object Main extends ZIOAppDefault {
   } yield result
 
   class ServiceImpl(service: WorkerServiceLogic) extends WorkerService {
-    def getSamples(request: SampleRequest): IO[StatusException,Pivots] = ???
+    def getSamples(request: SampleRequest): IO[StatusException,Pivots] = {
+      val result = for {
+        _ <- zio.Console.printLine(s"Sample requested with offset: ${request.offset}")
+        samples = service.getSampleStream(request.offset.toInt, 100)
+        result = Pivots(samples)
+      } yield result
+      result.mapError(e => new StatusException(Status.INTERNAL))
+    }
+
     def startShuffle(request: ShuffleRequest): IO[StatusException,SortResponse] = ???
-    def sendData(request: Stream[StatusException,Entity]): IO[StatusException,DataResponse] = ???
-  }
+    def sendData(request: Stream[StatusException,Entity]): IO[StatusException,DataResponse] = ??? }
 }
 
 trait WorkerServiceLogic {
