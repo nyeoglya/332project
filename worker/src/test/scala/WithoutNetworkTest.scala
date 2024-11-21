@@ -7,10 +7,10 @@ import org.rogach.scallop._
 import Main._
 import common._
 import proto.common.{Entity, Pivots}
-import zio.Unsafe
+import zio.{Ref, Runtime, Unsafe, ZLayer}
 import zio.test._
-import zio.Runtime
 
+import scala.collection.mutable.PriorityQueue
 import scala.language.postfixOps
 
 // <1st test>
@@ -141,7 +141,7 @@ class WithoutNetworkTest extends FunSuite {
     assert(mergedDatas.forall(entities => isDataSorted(entities)))
   }
 
-  test("overall correctness") {
+  test("overall correctness : total 4000 entities ") {
 
     val startTime = System.nanoTime()
 
@@ -160,12 +160,66 @@ class WithoutNetworkTest extends FunSuite {
 
     val from1 = worker1.getDataStream(new Pivots(pivots))
     val from2 = worker2.getDataStream(new Pivots(pivots))
+    println("from done")
     val result1 = worker1.sortStreams(List(from1(0), from2(0)))
-
+    println("result1 done")
     val result2 = worker2.sortStreams(List(from1(1), from2(1)))
+    println("result2 done")
     val resultFilePath1 = worker1.saveEntities(1, result1)
+    println("result1 saved")
     val resultFilePath2 = worker2.saveEntities(2, result2)
+    println("result2 saved")
+    val endTime = System.nanoTime()
+    val duration = (endTime - startTime) / 1e6
+    // this is for comparing before and after parallelization
+    // to check whether parallelization really works
+    // [1st] test time : 111675.2746 ms
+    // [2nd] test time : 116117.8385 ms
+    println(s"test time : $duration ms")
 
+    val resultEntities1 = worker1.readFile(resultFilePath1)
+    val resultEntities2 = worker2.readFile(resultFilePath2)
+    assert(isDataSorted(resultEntities1))
+    assert(isDataSorted(resultEntities2))
+    assert(isDataSorted(resultEntities1 ++ resultEntities2))
+  }
+
+  test("overall correctness : total 40000 entities ") {
+
+    val startTime = System.nanoTime()
+
+    val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/big_input -O src/test/withoutNetworkTestFiles/worker1/big_output".split(' ')
+    val args2 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker2/big_input -O src/test/withoutNetworkTestFiles/worker2/big_output".split(' ')
+
+    val worker1 = new WorkerLogic(new worker.Config(args1))
+    val worker2 = new WorkerLogic(new worker.Config(args2))
+
+    val offset = (worker1.getFileSize() + worker2.getFileSize()) / 1000
+
+    val sample1 = worker1.getSampleList(offset)
+    val sample2 = worker2.getSampleList(offset)
+    val sortedSample = (sample1 ++ sample2).sortBy(entity => entity.head)
+    val pivots = List(sortedSample(sortedSample.length / 2))
+
+    val from1 = worker1.getDataStream(new Pivots(pivots))
+    val from2 = worker2.getDataStream(new Pivots(pivots))
+    println("from done")
+    val result1 = worker1.sortStreams(List(from1(0), from2(0)))
+    println("result1 done")
+    val result2 = worker2.sortStreams(List(from1(1), from2(1)))
+    println("result2 done")
+    val len1 = Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe.run(result1.runCount).getOrThrow()
+    }
+    println(len1)
+    val len2 = Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe.run(result2.runCount).getOrThrow()
+    }
+    println(len2)
+    val resultFilePath1 = worker1.saveEntities(1, result1)
+    println("result1 saved")
+    val resultFilePath2 = worker2.saveEntities(2, result2)
+    println("result2 saved")
     val endTime = System.nanoTime()
     val duration = (endTime - startTime) / 1e6
     // this is for comparing before and after parallelization
