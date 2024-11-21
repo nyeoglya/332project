@@ -111,15 +111,23 @@ class MasterLogic(config: Config) {
   }
 
   def selectPivots(pivotCandicateListOriginal: List[Pivots]): Pivots = {
+    assert { !pivotCandicateListOriginal.isEmpty }
+    assert { !clients.isEmpty }
+
     val pivotCandicateList: List[String] = pivotCandicateListOriginal.flatMap(_.pivots)
 
     val pivotCandicateListSize: Long = pivotCandicateList.size
-
     val totalDataSize: Long = clients.map(_.size).sum
 
-    val pivotIndices: List[Int] = clients.map(_.size).scanLeft(0) { (acc, workerSize) =>
-      acc + (pivotCandicateListSize * (workerSize / totalDataSize)).toInt
-    }.tail
+    assert { totalDataSize != 0 }
+
+    val clientSizes = clients.map(_.size)
+    val pivotIndices: List[Int] = clientSizes match {
+      case _ :: Nil => Nil
+      case _ => clientSizes.init.scanLeft(0) { (acc, workerSize) =>
+        acc + (pivotCandicateListSize * (workerSize.toDouble / totalDataSize.toDouble)).toInt
+      }.tail
+    }
 
     Pivots(pivotIndices.map(idx => pivotCandicateList(idx)))
   }
