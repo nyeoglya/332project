@@ -19,7 +19,7 @@ message WorkerData {
 message WorkerDataResponse {}
 
 message SampleRequest {
-	int64 offset = 1;
+	int32 offset = 1;
 }
 
 message Entity {
