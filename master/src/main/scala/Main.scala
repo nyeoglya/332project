@@ -63,7 +63,7 @@ object Main extends ZIOAppDefault {
 }
 
 class MasterLogic(config: Config) {
-  case class WorkerClient(val client: Layer[Throwable, WorkerServiceClient], val size: BigInt)
+  case class WorkerClient(val client: Layer[Throwable, WorkerServiceClient], val size: Long)
   
   var workerIPList: List[String] = List()
   var clients: List[WorkerClient] = List()
@@ -74,7 +74,7 @@ class MasterLogic(config: Config) {
     *
     * @param clientAddress address of client
     */
-  def addClient(workerAddress: String, workerSize: BigInt): IO[Throwable, Any] = {
+  def addClient(workerAddress: String, workerSize: Long): IO[Throwable, Any] = {
     println(s"New worker[${clients.size}] attached: ${workerAddress}, Size: ${workerSize} Bytes")
     val address = AddressParser.parse(workerAddress).get
     clients = clients :+ WorkerClient(WorkerServiceClient.live(
@@ -94,13 +94,13 @@ class MasterLogic(config: Config) {
     for {
       _ <- zio.Console.printLine("Requests samples to each workers")
       pivotCandicateList <- ZIO.foreachPar(clients.map(_.client)) { layer =>
-          collectSample(layer).provideLayer(layer)
-        }
+        collectSample(layer).provideLayer(layer)
+      }
+
+      selectedPivots = selectPivots(pivotCandicateList)
+      _ <- zio.Console.printLine(selectedPivots.pivots)
+
     } yield pivotCandicateList
-
-    // ZIO는 실제로 사용되는 시점에서 비동기적으로 실행됨
-
-    // val selectedPivots = selectPivots(pivotCandicateList)
 
     // clients.foreach(client => sendPartitionToWorker(client.client, selectedPivots))
   }
@@ -110,37 +110,25 @@ class MasterLogic(config: Config) {
       workerServiceClient.getSamples(SampleRequest(offset))
   }
 
-  // TODO: ZIO가 아니라 평범하게 List[Pivots]로 수정 요망. (코드 내부에서 비동기적으로 돌아가는 부분이 없으므로)
-  def selectPivots(pivotCandicateZIOList: ZIO[Any, Throwable, List[Pivots]]): ZIO[Any, Throwable, Pivots] = {
-    val pivotCandicateList: ZIO[Any, Throwable, List[String]] = pivotCandicateZIOList.map { pivots =>
-      pivots.flatMap(_.pivots)
-    }
+  def selectPivots(pivotCandicateListOriginal: List[Pivots]): Pivots = {
+    val pivotCandicateList: List[String] = pivotCandicateListOriginal.flatMap(_.pivots)
 
-    val pivotCandicateListSize: ZIO[Any, Throwable, BigInt] = pivotCandicateList.map(_.size)
-    val totalDataSize: BigInt = clients.map(_.size).sum
+    val pivotCandicateListSize: Long = pivotCandicateList.size
 
-    val pivotIndices: ZIO[Any, Throwable, List[Int]] = for {
-      candidateListSize <- pivotCandicateListSize
-      result <- ZIO.succeed(
-        clients.map(_.size).scanLeft(0) { (acc, workerSize) =>
-          acc + (candidateListSize * (workerSize / totalDataSize)).toInt
-        }.tail
-      )
-    } yield result
+    val totalDataSize: Long = clients.map(_.size).sum
 
-    for {
-      pivotList <- pivotCandicateList
-      indices <- pivotIndices
-      distinctList = indices.map(idx => pivotList(idx)).distinct
-    } yield Pivots(pivots = distinctList)
+    val pivotIndices: List[Int] = clients.map(_.size).scanLeft(0) { (acc, workerSize) =>
+      acc + (pivotCandicateListSize * (workerSize / totalDataSize)).toInt
+    }.tail
+
+    Pivots(pivotIndices.map(idx => pivotCandicateList(idx)))
   }
 
   def sendPartitionToWorker(client: Layer[Throwable, WorkerServiceClient],
                           pivots: ZIO[Any, Throwable, Pivots]): ZIO[Any, Throwable, Unit] = for {
-  pivotsData <- pivots
-  workerServiceClient <- ZIO.scoped(client.build).map(_.get) // ZEnvironment에서 WorkerServiceClient 추출
-  shuffleRequest = ShuffleRequest(pivots = Some(pivotsData), workerAddresses = workerIPList)
-  _ <- workerServiceClient.startShuffle(shuffleRequest).mapError(e => new RuntimeException(s"Failed to send ShuffleRequest: ${e.getMessage}"))
-} yield ()
-
+    pivotsData <- pivots
+    workerServiceClient <- ZIO.scoped(client.build).map(_.get) // ZEnvironment에서 WorkerServiceClient 추출
+    shuffleRequest = ShuffleRequest(pivots = Some(pivotsData), workerAddresses = workerIPList)
+    _ <- workerServiceClient.startShuffle(shuffleRequest).mapError(e => new RuntimeException(s"Failed to send ShuffleRequest: ${e.getMessage}"))
+  } yield ()
 }
