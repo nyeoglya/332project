@@ -6,8 +6,11 @@ import org.scalatest.junit.JUnitRunner
 import org.rogach.scallop._
 import Main._
 import common._
-
+import proto.common.{Entity, Pivots}
+import zio.Unsafe
 import zio.test._
+import zio.Runtime
+
 import scala.language.postfixOps
 
 // <1st test>
@@ -23,63 +26,158 @@ import scala.language.postfixOps
 
 @RunWith(classOf[JUnitRunner])
 class WithoutNetworkTest extends FunSuite {
-  test("dummy test") {
-    assertTrue(true)
+
+  def isDataSorted(data : List[Entity]) : Boolean = {
+    def isDataSortedAux(data : List[Entity], prev : String) : Boolean = {
+      data match {
+        case Nil => true
+        case e::nextData =>
+          if(e.head > prev) isDataSortedAux(nextData, e.head)
+          else false
+      }
+    }
+    isDataSortedAux(data, "")
   }
 
-  test("Main Config") {
-    val args = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/input -O src/test/withoutNetworkTestFiles/worker1/output".split(' ')
-    Main.main(args)
-    assertTrue(config.masterAddress.toOption.get == "141.223.91.80:30040")
-    assertTrue(config.inputDirectories.toOption.get == List("src/test/withoutNetworkTestFiles/worker1/input"))
-    assertTrue(config.outputDirectory.toOption.get == "src/test/withoutNetworkTestFiles/worker1/output")
+  test("dummy test") {
+    assert(true)
+  }
+
+  test("sortSmallFile test : sorted correctly ") {
+    val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/input -O src/test/withoutNetworkTestFiles/worker1/output".split(' ')
+    val worker1 = new WorkerLogic(new worker.Config(args1))
+    val sortedDatas = worker1.sortedSmallFilePaths.map(path => worker1.readFile(path))
+    assert(sortedDatas.forall(entities => isDataSorted(entities)))
+  }
+
+  test("produceSampleFile test : subset ") {
+    val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/input -O src/test/withoutNetworkTestFiles/worker1/output".split(' ')
+    val worker1 = new WorkerLogic(new worker.Config(args1))
+    val originalData = worker1.readFile("src/test/withoutNetworkTestFiles/worker1/input/input1.txt")
+    val sampleFilePath = worker1.produceSampleFile("src/test/withoutNetworkTestFiles/worker1/input/input1.txt", 100)
+    val sampleData = worker1.readFile(sampleFilePath)
+    assert(sampleData.forall(entity => originalData.contains(entity)))
+  }
+
+  test("produceSampleFile test : sorted ") {
+    val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/input -O src/test/withoutNetworkTestFiles/worker1/output".split(' ')
+    val worker1 = new WorkerLogic(new worker.Config(args1))
+    val sampleFilePath = worker1.produceSampleFile(worker1.sortedSmallFilePaths.head, 100)
+    val sampleData = worker1.readFile(sampleFilePath)
+    assert(isDataSorted(sampleData))
+  }
+
+  test("produceSampleFile test : length ") {
+    val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/input -O src/test/withoutNetworkTestFiles/worker1/output".split(' ')
+    val worker1 = new WorkerLogic(new worker.Config(args1))
+    val originalData = worker1.readFile("src/test/withoutNetworkTestFiles/worker1/input/input1.txt")
+    val sampleFilePath = worker1.produceSampleFile("src/test/withoutNetworkTestFiles/worker1/input/input1.txt", 100)
+    val sampleData = worker1.readFile(sampleFilePath)
+    assert(sampleData.length == (originalData.length + 100 - 1) / 100)
+  }
+
+  test("sampleFilesToSampleList test : length ") {
+    val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/input -O src/test/withoutNetworkTestFiles/worker1/output".split(' ')
+    val worker1 = new WorkerLogic(new worker.Config(args1))
+    val sampleFilePaths = worker1.sortedSmallFilePaths.map(path => worker1.produceSampleFile(path, 100))
+    val sampleDatas = sampleFilePaths.map(path => worker1.readFile(path))
+    val sampleList = worker1.sampleFilesToSampleList(sampleFilePaths)
+    assert(sampleList.length == sampleDatas.map(_.length).sum)
+  }
+
+  test("splitFileIntoPartitionStreams test : N stream ") {
+    val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/input -O src/test/withoutNetworkTestFiles/worker1/output".split(' ')
+    val worker1 = new WorkerLogic(new worker.Config(args1))
+    val partitionedStreams = worker1.splitFileIntoPartitionStreams(worker1.sortedSmallFilePaths.head, List("FP]Wi|7_W9"))
+    assert(partitionedStreams.length == 2)
+  }
+
+  test("splitFileIntoPartitionStreams test : length ") {
+    val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/input -O src/test/withoutNetworkTestFiles/worker1/output".split(' ')
+    val worker1 = new WorkerLogic(new worker.Config(args1))
+    val partitionedStreams = worker1.splitFileIntoPartitionStreams(worker1.sortedSmallFilePaths.head, List("FP]Wi|7_W9"))
+    val partitionedLengthSum = Unsafe.unsafe { implicit unsafe =>
+      partitionedStreams.map(st => Runtime.default.unsafe.run(st.runCount).getOrThrow()).sum
+    }
+    assert(partitionedLengthSum == worker1.readFile(worker1.sortedSmallFilePaths.head).length)
+  }
+
+  test("splitFileIntoPartitionStreams test : sort ") {
+    val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/input -O src/test/withoutNetworkTestFiles/worker1/output".split(' ')
+    val worker1 = new WorkerLogic(new worker.Config(args1))
+    val partitionedStreams = worker1.splitFileIntoPartitionStreams(worker1.sortedSmallFilePaths.head, List("FP]Wi|7_W9"))
+    val partitionedDatas = Unsafe.unsafe { implicit unsafe =>
+      partitionedStreams.map(st => Runtime.default.unsafe.run(st.runCollect.map(_.toList)).getOrThrow())
+    }
+    assert(partitionedDatas.forall(entitys => isDataSorted(entitys)))
+  }
+
+  test("mergeStreams test : length ") {
+    val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/input -O src/test/withoutNetworkTestFiles/worker1/output".split(' ')
+    val worker1 = new WorkerLogic(new worker.Config(args1))
+    val partitionStreams = worker1.sortedSmallFilePaths.map(path => worker1.splitFileIntoPartitionStreams(path, List("FP]Wi|7_W9")))
+    val toWorkerStreams = for {
+      n <- (0 to 1).toList
+      toN = partitionStreams.map(_(n))
+    } yield toN
+    val toWorker1 = toWorkerStreams.head
+    val toWorker1LengthSum = Unsafe.unsafe { implicit unsafe =>
+      toWorker1.map(st => Runtime.default.unsafe.run(st.runCount).getOrThrow()).sum
+    }
+    val mergedStream1 = worker1.mergeStreams(toWorkerStreams.head)
+    val mergedStream1Length = Unsafe.unsafe { implicit unsafe =>
+      Runtime.default.unsafe.run(mergedStream1.runCount).getOrThrow()
+    }
+    assert(mergedStream1Length == toWorker1LengthSum)
+  }
+
+  test("mergeStreams test : sorted ") {
+    val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/input -O src/test/withoutNetworkTestFiles/worker1/output".split(' ')
+    val worker1 = new WorkerLogic(new worker.Config(args1))
+    val mergedStreams = worker1.getDataStream(new Pivots(List("FP]Wi|7_W9")))
+    val mergedDatas = Unsafe.unsafe { implicit unsafe =>
+      mergedStreams.map(st => Runtime.default.unsafe.run(st.runCollect.map(_.toList)).getOrThrow())
+    }
+    assert(mergedDatas.forall(entities => isDataSorted(entities)))
   }
 
   test("overall correctness") {
 
     val startTime = System.nanoTime()
 
-    Mode.testMode = "WithoutNetworkTest"
     val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/input -O src/test/withoutNetworkTestFiles/worker1/output".split(' ')
     val args2 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker2/input -O src/test/withoutNetworkTestFiles/worker2/output".split(' ')
 
-    Mode.machineNumber = 1
-    Main.main(args1)
-    val sample1 = Main.sampleStream
+    val worker1 = new WorkerLogic(new worker.Config(args1))
+    val worker2 = new WorkerLogic(new worker.Config(args2))
 
-    Mode.machineNumber = 2
-    Main.main(args2)
-    val sample2 = Main.sampleStream
+    val offset = (worker1.getFileSize() + worker2.getFileSize()) / 1000
 
+    val sample1 = worker1.getSampleList(offset)
+    val sample2 = worker2.getSampleList(offset)
     val sortedSample = (sample1 ++ sample2).sortBy(entity => entity.head)
     val pivots = List(sortedSample(sortedSample.length / 2))
 
-    Mode.machineNumber = 1
-    Mode.pivotList = pivots
-    Main.main(args1)
-    val from1 = Main.beforeShuffleStreams
+    val from1 = worker1.getDataStream(new Pivots(pivots))
+    val from2 = worker2.getDataStream(new Pivots(pivots))
+    val result1 = worker1.sortStreams(List(from1(0), from2(0)))
 
-    Mode.machineNumber = 2
-    Mode.pivotList = pivots
-    Main.main(args2)
-    val from2 = Main.beforeShuffleStreams
-
-    Mode.machineNumber = 1
-    Mode.shuffledStreams = List(from1(0), from2(0))
-    Main.main(args1)
-    val result1 = Main.mergedFilePath
-
-    Mode.machineNumber = 2
-    Mode.shuffledStreams = List(from1(1), from2(1))
-    Main.main(args2)
-    val result2 = Main.mergedFilePath
+    val result2 = worker2.sortStreams(List(from1(1), from2(1)))
+    val resultFilePath1 = worker1.saveEntities(1, result1)
+    val resultFilePath2 = worker2.saveEntities(2, result2)
 
     val endTime = System.nanoTime()
     val duration = (endTime - startTime) / 1e6
     // this is for comparing before and after parallelization
     // to check whether parallelization really works
-    // [1st] test time : 112978.4586 ms
-    // [2nd] test time : 109899.5734 ms
+    // [1st] test time : 111675.2746 ms
+    // [2nd] test time : 116117.8385 ms
     println(s"test time : $duration ms")
+
+    val resultEntities1 = worker1.readFile(resultFilePath1)
+    val resultEntities2 = worker2.readFile(resultFilePath2)
+    assert(isDataSorted(resultEntities1))
+    assert(isDataSorted(resultEntities2))
+    assert(isDataSorted(resultEntities1 ++ resultEntities2))
   }
 }
