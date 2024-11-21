@@ -86,7 +86,7 @@ object Main extends ZIOAppDefault {
     def getSamples(request: SampleRequest): IO[StatusException,Pivots] = {
       val result = for {
         _ <- zio.Console.printLine(s"Sample requested with offset: ${request.offset}")
-        samples = service.getSampleStream(request.offset.toInt, 100)
+        samples = service.getSampleList(request.offset.toInt)
         result = Pivots(samples)
       } yield result
       result.mapError(e => new StatusException(Status.INTERNAL))

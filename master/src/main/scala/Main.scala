@@ -57,7 +57,10 @@ object Main extends ZIOAppDefault {
         result <- ZIO.succeed(WorkerDataResponse())
       } yield result
 
-      result.mapError(e => new StatusException(Status.INTERNAL))
+      result.mapError(e => e match {
+        case e: StatusException => {e} 
+        case _ => new StatusException(Status.INTERNAL)
+      })
     }
   }
 }
@@ -75,17 +78,22 @@ class MasterLogic(config: Config) {
     * @param clientAddress address of client
     */
   def addClient(workerAddress: String, workerSize: BigInt): IO[Throwable, Any] = {
-    println(s"New worker[${clients.size}] attached: ${workerAddress}, Size: ${workerSize} Bytes")
-    val address = AddressParser.parse(workerAddress).get
-    clients = clients :+ WorkerClient(WorkerServiceClient.live(
-      ZManagedChannel(
-        ManagedChannelBuilder.forAddress(address._1, address._2).usePlaintext()
-      )
-    ), workerSize)
-    workerIPList = workerIPList :+ workerAddress
+    if (clients.size >= config.workerNum.toOption.get) {
+      println(s"Worker attached: ${workerAddress} but rejected")
+      ZIO.fail(new StatusException(Status.UNAVAILABLE))
+    } else {
+      println(s"New worker[${clients.size}] attached: ${workerAddress}, Size: ${workerSize} Bytes")
+      val address = AddressParser.parse(workerAddress).get
+      clients = clients :+ WorkerClient(WorkerServiceClient.live(
+        ZManagedChannel(
+          ManagedChannelBuilder.forAddress(address._1, address._2).usePlaintext()
+        )
+      ), workerSize)
+      workerIPList = workerIPList :+ workerAddress
 
-    if (clients.size == config.workerNum.toOption.get) this.run()
-    else ZIO.succeed(())
+      if (clients.size == config.workerNum.toOption.get) this.run()
+      else ZIO.succeed(())
+    }
   }
 
   def run(): IO[Throwable, Any] = {
