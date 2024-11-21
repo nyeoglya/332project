@@ -68,7 +68,7 @@ class MasterLogic(config: Config) {
   var workerIPList: List[String] = List()
   var clients: List[WorkerClient] = List()
 
-  lazy val offset: Long = clients.map(_.size).sum.toLong
+  lazy val offset: Int = (clients.map(_.size).sum / clients.size).toInt
 
   /** Add new client connection to MasterLogic
     *
