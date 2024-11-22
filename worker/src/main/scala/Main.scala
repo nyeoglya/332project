@@ -243,6 +243,32 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     makeMergeStream(partitionStreams.map(_.drop(1)), ZStream.empty)
   }
 
+  def mergeWrite(workerNum: Int, partitionStreams : List[Stream[Throwable, Entity]]) : String = {
+    implicit val entityOrdering : Ordering[(Entity, Int)] = Ordering.by(_._1.head)
+    val minHeap : PriorityQueue[(Entity, Int)] = PriorityQueue.empty(entityOrdering.reverse)
+    partitionStreams.zipWithIndex foreach {
+      case (stream, index) =>
+        val head = zio2entity(stream.runHead.map(_.getOrElse(Entity("", ""))))
+        if(head != Entity("", ""))
+          minHeap.enqueue((head, index))
+    }
+    var partitions = partitionStreams.map(_.drop(1))
+
+    val filePath = PathMaker.mergedFile(workerNum)
+    val writer = new PrintWriter(filePath)
+    while(minHeap.isEmpty) {
+      val (minEntity, minIndex) = minHeap.dequeue()
+      val head = zio2entity(partitions(minIndex).runHead.map(_.getOrElse(Entity("", ""))))
+      val tailStream = partitions(minIndex).drop(1)
+      if(head != Entity("",""))
+        partitions = partitions.updated(minIndex, tailStream)
+      writer.write(minEntity.head)
+      writer.write(minEntity.body)
+    }
+    writer.close()
+    filePath
+  }
+
 
   val originalSmallFilePaths : List[String] = {
     config.inputDirectories.toOption.getOrElse(List(""))

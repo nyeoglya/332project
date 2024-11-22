@@ -161,14 +161,10 @@ class WithoutNetworkTest extends FunSuite {
     val from1 = worker1.getDataStream(new Pivots(pivots))
     val from2 = worker2.getDataStream(new Pivots(pivots))
     println("from done")
-    val result1 = worker1.sortStreams(List(from1(0), from2(0)))
+    val resultFilePath1 = worker1.mergeWrite(1,List(from1(0), from2(0)))
     println("result1 done")
-    val result2 = worker2.sortStreams(List(from1(1), from2(1)))
+    val resultFilePath2 = worker2.mergeWrite(2,List(from1(1), from2(1)))
     println("result2 done")
-    val resultFilePath1 = worker1.saveEntities(1, result1)
-    println("result1 saved")
-    val resultFilePath2 = worker2.saveEntities(2, result2)
-    println("result2 saved")
     val endTime = System.nanoTime()
     val duration = (endTime - startTime) / 1e6
     // this is for comparing before and after parallelization
@@ -204,22 +200,10 @@ class WithoutNetworkTest extends FunSuite {
     val from1 = worker1.getDataStream(new Pivots(pivots))
     val from2 = worker2.getDataStream(new Pivots(pivots))
     println("from done")
-    val result1 = worker1.sortStreams(List(from1(0), from2(0)))
+    val resultFilePath1 = worker1.mergeWrite(1,List(from1(0), from2(0)))
     println("result1 done")
-    val result2 = worker2.sortStreams(List(from1(1), from2(1)))
+    val resultFilePath2 = worker2.mergeWrite(2,List(from1(1), from2(1)))
     println("result2 done")
-    val len1 = Unsafe.unsafe { implicit unsafe =>
-      Runtime.default.unsafe.run(result1.runCount).getOrThrow()
-    }
-    println(len1)
-    val len2 = Unsafe.unsafe { implicit unsafe =>
-      Runtime.default.unsafe.run(result2.runCount).getOrThrow()
-    }
-    println(len2)
-    val resultFilePath1 = worker1.saveEntities(1, result1)
-    println("result1 saved")
-    val resultFilePath2 = worker2.saveEntities(2, result2)
-    println("result2 saved")
     val endTime = System.nanoTime()
     val duration = (endTime - startTime) / 1e6
     // this is for comparing before and after parallelization
