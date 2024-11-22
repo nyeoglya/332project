@@ -4,15 +4,17 @@ import org.rogach.scallop._
 import zio._
 import zio.stream._
 import scalapb.zio_grpc.{ServerMain, ServiceList}
+
 import java.io.{File, PrintWriter}
 import java.nio.file.{Files, Paths}
 import scala.io.Source
 import io.grpc.StatusException
 import io.grpc.ServerBuilder
 import io.grpc.protobuf.services.ProtoReflectionService
-import proto.common.{SampleRequest, Entity, DataResponse, SortResponse, Pivots}
+import proto.common.{DataResponse, Entity, Pivots, SampleRequest, SortResponse}
 import proto.common.ZioCommon.WorkerService
 import scalapb.zio_grpc
+
 import java.nio.file.Files
 import scala.collection.mutable.PriorityQueue
 import scala.language.postfixOps
@@ -22,8 +24,11 @@ import io.grpc.ManagedChannelBuilder
 import proto.common.WorkerData
 import proto.common.WorkerDataResponse
 import common.AddressParser
-import zio.stream.ZStream.HaltStrategy
+import zio.stream.ZStream.{HaltStrategy, fromQueue}
 import io.grpc.Status
+
+import scala.annotation.tailrec
+
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val masterAddress = trailArg[String](required = true, descr = "Mater address (e.g. 192.168.0.1:8000)", default = Some("127.0.0.1"))
@@ -105,38 +110,35 @@ trait WorkerServiceLogic {
     */
   def getFileSize(): Int
 
-  /** Save Entities to file system
-    * 
-    *
-    * @param data Stream of Entity
-    */
-  def saveEntities(index: Integer, data: Stream[Throwable, Entity]): String
-
   /** Get Stream of sample Entity datas
     * 
     * @return Stream of sample Entity to send
     */
   def getSampleList(offset: Integer): List[String]
 
-  /** Get Stream of Entity to send other workers
-    *
-    * @param index
-    * @param partition
-    * @return
-    */
-  def getDataStream(partition: Pivots): List[Stream[Throwable, Entity]]
+  /** Get file paths List
+   * n-th elem : file path List that will be sent to worker n
+   *
+   * @param partition
+   * @return
+   */
+  def getToWorkerNFilePaths(partition: Pivots): List[List[String]]
 
-  /** Sort multiple Entity Streams
-    *
-    * @param data
-    * @return
-    */
-  def sortStreams(data: List[Stream[Throwable, Entity]]): Stream[Throwable, Entity]
+  /** Merge given files using heap sort
+   * when one minValue determined by heap sort, immediately write it on result File
+   *
+   * @param workerNum
+   * @param partitionedFilePaths
+   * @return
+   */
+  def mergeWrite(workerNum: Int, partitionedFilePaths : List[String]) : String
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 class WorkerLogic(config: Config) extends WorkerServiceLogic {
+
+  val runtime = Runtime.default
 
   object PathMaker {
     def sortedSmallFile(filePath : String) : String = {
@@ -147,6 +149,10 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       val index = filePath.lastIndexOf('/')
       config.outputDirectory.toOption.get + "/sampled_" + filePath.substring(index + 1)
     }
+    def partitionedFile(workerNum: Int, filePath: String) ={
+      val index = filePath.lastIndexOf('/')
+      config.outputDirectory.toOption.get + "/partitioned_to_" + workerNum.toString + "_" + filePath.substring(index + 1)
+    }
     def mergedFile(index : Integer) : String = {
       config.outputDirectory.toOption.get + "/mergedFile" + index.toString
     }
@@ -155,7 +161,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   def zio2entity(zio : ZIO[Any, Throwable, Entity]) : Entity =
     Unsafe unsafe {
       implicit unsafe =>
-        Runtime.default.unsafe.run(zio).getOrThrow()
+        runtime.unsafe.run(zio).getOrThrow()
     }
 
   def readFile(filePath : String) : List[Entity] = {
@@ -202,37 +208,21 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     filePaths.flatMap(path => readFile(path)).map(entity => entity.head)
   }
 
-  def splitFileIntoPartitionStreams(filePath : String, pivots : List[String]) : List[Stream[Throwable, Entity]] = {
+  def makePartitionedFiles(filePath : String, pivots : List[String]) : List[String] = {
     assert(pivots.nonEmpty)
     val data = readFile(filePath)
-    def splitUsingPivots(data : List[Entity], pivots: List[String]) : List[List[Entity]] = pivots match {
+
+    def splitUsingPivots(data: List[Entity], pivots: List[String]): List[List[Entity]] = pivots match {
       case Nil => List(data)
-      case pivot::pivots =>
+      case pivot :: pivots =>
         data.takeWhile(entity => entity.head < pivot) :: splitUsingPivots(data.dropWhile(entity => entity.head < pivot), pivots)
     }
-    splitUsingPivots(data, pivots).map(entityList => ZStream.fromIterable(entityList))
-  }
 
-  def mergeStreams(partitionStreams : List[Stream[Throwable, Entity]]) : Stream[Throwable, Entity] = {
-    implicit val entityOrdering : Ordering[(Entity, Int)] = Ordering.by(_._1.head)
-    val minHeap : PriorityQueue[(Entity, Int)] = PriorityQueue.empty(entityOrdering.reverse)
-    partitionStreams.zipWithIndex foreach {
-      case (stream, index) =>
-        val head = zio2entity(stream.runHead.map(_.getOrElse(Entity("", ""))))
-        if(head != Entity("", ""))
-          minHeap.enqueue((head, index))
+    splitUsingPivots(data, pivots).zipWithIndex.map { case (entityList, index) =>
+      val partitionedFilePath = PathMaker.partitionedFile(index, filePath)
+      writeFile(partitionedFilePath, entityList)
+      partitionedFilePath
     }
-    def makeMergeStream(streams : List[Stream[Throwable, Entity]], accStream : Stream[Throwable, Entity]) : Stream[Throwable, Entity] = {
-      if(minHeap.isEmpty) accStream
-      else {
-        val (minEntity, minIndex) = minHeap.dequeue()
-        val head = zio2entity(streams(minIndex).runHead.map(_.getOrElse(Entity("", ""))))
-        val tailStream = streams(minIndex).drop(1)
-        if (head != Entity("", "")) minHeap.enqueue((head, minIndex))
-        makeMergeStream(streams.updated(minIndex, tailStream), accStream ++ ZStream.succeed(minEntity))
-      }
-    }
-    makeMergeStream(partitionStreams.map(_.drop(1)), ZStream.empty)
   }
 
   val originalSmallFilePaths : List[String] = {
@@ -246,46 +236,61 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   val sortedSmallFilePaths : List[String] = originalSmallFilePaths.map(path => sortSmallFile(path))
 
   // TODO: Read files from storage
+
   def inputEntities: Stream[Throwable, Entity] =
     ZStream.fromIterable(originalSmallFilePaths).flatMap(path => ZStream.fromIterable(readFile(path)))
 
-  def saveEntities(index: Integer, data: Stream[Throwable,Entity]): String = {
-    val filePath = PathMaker.mergedFile(index)
-    val file = new File(filePath)
-    val writer = new PrintWriter(file)
-    try {
-      Unsafe unsafe {
-        implicit unsafe =>
-          Runtime.default.unsafe.run{
-            data.runForeach(entity => {
-              writer.write(entity.head)
-              writer.write(entity.body)
-              ZIO.succeed(())
-            })
-          }
-          filePath
-      }
-    } finally {
-      writer.close()
-    }
-  }
-
   def getFileSize(): Int = originalSmallFilePaths.map(path => Files.size(Paths.get(path))).sum.toInt
-  def getDataStream(partition: Pivots): List[Stream[Throwable,Entity]] = {
-    val partitionStreams : List[List[Stream[Throwable, Entity]]] =
-      sortedSmallFilePaths.map(path => splitFileIntoPartitionStreams(path, partition.pivots.toList))
-    val toWorkerStreams = for {
-      n <- (0 to partition.pivots.length).toList
-      toN = partitionStreams.map(_(n))
-    } yield toN
-    toWorkerStreams.map(toWorkerN => mergeStreams(toWorkerN))
-  }
   def getSampleList(offset: Integer): List[String] = {
-    val sampleFilePaths = sortedSmallFilePaths.map(path => produceSampleFile(path, offset))
+    val parallelSampling: ZIO[Any, Throwable, List[String]] =
+      ZIO.foreachPar(sortedSmallFilePaths)(path => ZIO.succeed(produceSampleFile(path, offset)))
+    val sampleFilePaths = Unsafe unsafe { implicit unsafe =>
+      runtime.unsafe.run(parallelSampling).getOrThrow()
+    }
     sampleFilesToSampleList(sampleFilePaths)
   }
-  def sortStreams(data: List[Stream[Throwable,Entity]]): Stream[Throwable,Entity] = {
-    mergeStreams(data)
+  def getToWorkerNFilePaths(partition: Pivots): List[List[String]] = {
+    val parallelPartitioning: ZIO[Any, Throwable, List[List[String]]] =
+      ZIO.foreachPar(sortedSmallFilePaths)(path => ZIO.succeed(makePartitionedFiles(path, partition.pivots.toList)))
+    val partitionFilePaths : List[List[String]] =
+      Unsafe unsafe { implicit unsafe =>
+        runtime.unsafe.run(parallelPartitioning).getOrThrow()
+      }
+    val toWorkerFilePaths = for {
+      n <- (0 to partition.pivots.length).toList
+      toN = partitionFilePaths.map(_(n))
+    } yield toN
+    toWorkerFilePaths
+  }
+
+  def mergeWrite(workerNum: Int, partitionedFilePaths : List[String]) : String = {
+    implicit val entityOrdering : Ordering[(Entity, Int)] = Ordering.by(_._1.head)
+    val minHeap : PriorityQueue[(Entity, Int)] = PriorityQueue.empty(entityOrdering.reverse)
+
+    val partitionedStreams = partitionedFilePaths.map { path =>
+      ZStream.fromIterable(readFile(path))
+    }
+    partitionedStreams.zipWithIndex.foreach { case (stream, index) =>
+      val head = zio2entity(stream.runHead.map(_.getOrElse(Entity("", ""))))
+      if(head != Entity("", ""))
+        minHeap.enqueue((head, index))
+    }
+    var partitions = partitionedStreams.map(_.drop(1))
+
+    val filePath = PathMaker.mergedFile(workerNum)
+    val writer = new PrintWriter(filePath)
+    while(minHeap.nonEmpty) {
+      val (minEntity, minIndex) = minHeap.dequeue()
+      val head = zio2entity(partitions(minIndex).runHead.map(_.getOrElse(Entity("", ""))))
+      val tailStream = partitions(minIndex).drop(1)
+      partitions = partitions.updated(minIndex, tailStream)
+      if(head != Entity("",""))
+        minHeap.enqueue((head, minIndex))
+      writer.write(minEntity.head)
+      writer.write(minEntity.body)
+    }
+    writer.close()
+    filePath
   }
 }
 
