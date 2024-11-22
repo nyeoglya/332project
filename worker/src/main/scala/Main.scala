@@ -5,7 +5,7 @@ import zio._
 import zio.stream._
 import scalapb.zio_grpc.{ServerMain, ServiceList}
 
-import java.io.{File, PrintWriter}
+import java.io.{BufferedReader, File, FileReader, PrintWriter}
 import java.nio.file.{Files, Paths}
 import scala.io.Source
 import io.grpc.StatusException
@@ -27,6 +27,7 @@ import common.AddressParser
 import zio.stream.ZStream.{HaltStrategy, fromQueue}
 import io.grpc.Status
 
+import java.nio.charset.StandardCharsets
 import scala.annotation.tailrec
 
 
@@ -138,8 +139,6 @@ trait WorkerServiceLogic {
 
 class WorkerLogic(config: Config) extends WorkerServiceLogic {
 
-  val runtime = Runtime.default
-
   object PathMaker {
     def sortedSmallFile(filePath : String) : String = {
       val index = filePath.lastIndexOf('/')
@@ -151,18 +150,13 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     }
     def partitionedFile(workerNum: Int, filePath: String) ={
       val index = filePath.lastIndexOf('/')
-      config.outputDirectory.toOption.get + "/partitioned_to_" + workerNum.toString + "_" + filePath.substring(index + 1)
+      config.outputDirectory.toOption.get + "/to" + workerNum.toString + "_" + filePath.substring(index + 1)
     }
-    def mergedFile(index : Integer) : String = {
-      config.outputDirectory.toOption.get + "/mergedFile" + index.toString
+    def mergedFile(num: Int, filePath: String): String = {
+      val index = filePath.lastIndexOf('/')
+      config.outputDirectory.toOption.get + "/m" + num.toString + "_" + filePath.substring(index + 1)
     }
   }
-
-  def zio2entity(zio : ZIO[Any, Throwable, Entity]) : Entity =
-    Unsafe unsafe {
-      implicit unsafe =>
-        runtime.unsafe.run(zio).getOrThrow()
-    }
 
   def readFile(filePath : String) : List[Entity] = {
     val source = Source.fromFile(filePath)
@@ -225,6 +219,38 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     }
   }
 
+  def readEntity(reader: BufferedReader): Entity = {
+    val line = reader.readLine()
+    if(line == null) Entity("","")
+    else Entity(line.splitAt(10)._1, line.splitAt(10)._2 + java.lang.System.lineSeparator())
+  }
+  def mergeTwoFile(num: Int, path1: String, path2: String): String = {
+    val reader1 = new BufferedReader(new FileReader(path1))
+    val reader2 = new BufferedReader(new FileReader(path2))
+    val filePath = PathMaker.mergedFile(num, path1)
+    val writer = new PrintWriter(filePath)
+    def merge(entity1: Entity, entity2: Entity): Unit = {
+      if(entity1 == Entity("","") && entity2 == Entity("","")) ()
+      else if(entity1.head < entity2.head && entity1 != Entity("","") || entity2 == Entity("","")) {
+        writer.write(entity1.head)
+        writer.write(entity1.body)
+        merge(readEntity(reader1), entity2)
+      }
+      else {
+        writer.write(entity2.head)
+        writer.write(entity2.body)
+        merge(entity1, readEntity(reader2))
+      }
+    }
+    merge(readEntity(reader1), readEntity(reader2))
+    writer.close()
+    reader1.close()
+    reader2.close()
+    Files.delete(Paths.get(path1))
+    Files.delete(Paths.get(path2))
+    filePath
+  }
+
   val originalSmallFilePaths : List[String] = {
     config.inputDirectories.toOption.getOrElse(List(""))
       .flatMap{ directoryPath =>
@@ -245,7 +271,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     val parallelSampling: ZIO[Any, Throwable, List[String]] =
       ZIO.foreachPar(sortedSmallFilePaths)(path => ZIO.succeed(produceSampleFile(path, offset)))
     val sampleFilePaths = Unsafe unsafe { implicit unsafe =>
-      runtime.unsafe.run(parallelSampling).getOrThrow()
+      Runtime.default.unsafe.run(parallelSampling).getOrThrow()
     }
     sampleFilesToSampleList(sampleFilePaths)
   }
@@ -254,7 +280,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       ZIO.foreachPar(sortedSmallFilePaths)(path => ZIO.succeed(makePartitionedFiles(path, partition.pivots.toList)))
     val partitionFilePaths : List[List[String]] =
       Unsafe unsafe { implicit unsafe =>
-        runtime.unsafe.run(parallelPartitioning).getOrThrow()
+        Runtime.default.unsafe.run(parallelPartitioning).getOrThrow()
       }
     val toWorkerFilePaths = for {
       n <- (0 to partition.pivots.length).toList
@@ -264,33 +290,18 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   }
 
   def mergeWrite(workerNum: Int, partitionedFilePaths : List[String]) : String = {
-    implicit val entityOrdering : Ordering[(Entity, Int)] = Ordering.by(_._1.head)
-    val minHeap : PriorityQueue[(Entity, Int)] = PriorityQueue.empty(entityOrdering.reverse)
-
-    val partitionedStreams = partitionedFilePaths.map { path =>
-      ZStream.fromIterable(readFile(path))
+    def mergeLevel(filePaths: List[String]): String = {
+      if(filePaths.length == 1) filePaths.head
+      else {
+        val nextFilePaths =
+          filePaths.sliding(2,2).toList.zipWithIndex.map { case (paths, index) =>
+            if (paths.length == 1) paths.head
+            else mergeTwoFile(index, paths(0), paths(1))
+          }
+        mergeLevel(nextFilePaths)
+      }
     }
-    partitionedStreams.zipWithIndex.foreach { case (stream, index) =>
-      val head = zio2entity(stream.runHead.map(_.getOrElse(Entity("", ""))))
-      if(head != Entity("", ""))
-        minHeap.enqueue((head, index))
-    }
-    var partitions = partitionedStreams.map(_.drop(1))
-
-    val filePath = PathMaker.mergedFile(workerNum)
-    val writer = new PrintWriter(filePath)
-    while(minHeap.nonEmpty) {
-      val (minEntity, minIndex) = minHeap.dequeue()
-      val head = zio2entity(partitions(minIndex).runHead.map(_.getOrElse(Entity("", ""))))
-      val tailStream = partitions(minIndex).drop(1)
-      partitions = partitions.updated(minIndex, tailStream)
-      if(head != Entity("",""))
-        minHeap.enqueue((head, minIndex))
-      writer.write(minEntity.head)
-      writer.write(minEntity.body)
-    }
-    writer.close()
-    filePath
+    mergeLevel(partitionedFilePaths)
   }
 }
 

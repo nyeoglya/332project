@@ -109,26 +109,28 @@ class WithoutNetworkTest extends FunSuite {
     assert(partitionedDatas.forall(entities => isDataSorted(entities)))
   }
 
-  test("mergeWrite test: transformed well ") {
-    val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/input -O src/test/withoutNetworkTestFiles/worker1/output".split(' ')
+  test("mergeTwoFile test: length ") {
+    val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/small_input -O src/test/withoutNetworkTestFiles/worker1/small_output".split(' ')
     val worker1 = new WorkerLogic(new worker.Config(args1))
-    val mergedFile = worker1.mergeWrite(1, worker1.sortedSmallFilePaths)
-    val streams = worker1.sortedSmallFilePaths.map { path =>
-      ZStream.fromIterable(worker1.readFile(path))
-    }
-    val dataFromOrigin = worker1.readFile(worker1.sortedSmallFilePaths.head)
-    val dataFromStream =
-      Unsafe unsafe { implicit unsafe =>
-        Runtime.default.unsafe.run(streams.head.runCollect.map(_.toList)).getOrThrow()
-      }
-    assert(dataFromOrigin == dataFromStream)
+    val originalLength = worker1.sortedSmallFilePaths.map(path => worker1.readFile(path).length).sum
+    val mergedFilePath = worker1.mergeTwoFile(0, worker1.sortedSmallFilePaths.head, worker1.sortedSmallFilePaths(1))
+    val data = worker1.readFile(mergedFilePath)
+    assert(data.length == originalLength)
+  }
+
+  test("mergeTwoFile test: sort ") {
+    val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/small_input -O src/test/withoutNetworkTestFiles/worker1/small_output".split(' ')
+    val worker1 = new WorkerLogic(new worker.Config(args1))
+    val mergedFilePath = worker1.mergeTwoFile(0, worker1.sortedSmallFilePaths.head, worker1.sortedSmallFilePaths(1))
+    val data = worker1.readFile(mergedFilePath)
+    assert(isDataSorted(data))
   }
 
   test("mergeWrite test : length ") {
     val args1 = "141.223.91.80:30040 -I src/test/withoutNetworkTestFiles/worker1/input -O src/test/withoutNetworkTestFiles/worker1/output".split(' ')
     val worker1 = new WorkerLogic(new worker.Config(args1))
-    val mergedFile = worker1.mergeWrite(1, worker1.sortedSmallFilePaths)
     val originalLength = worker1.sortedSmallFilePaths.map(path => worker1.readFile(path).length).sum
+    val mergedFile = worker1.mergeWrite(1, worker1.sortedSmallFilePaths)
     val mergedLength = worker1.readFile(mergedFile).length
     assert(originalLength == mergedLength)
   }
@@ -155,19 +157,22 @@ class WithoutNetworkTest extends FunSuite {
 
     val sample1 = worker1.getSampleList(offset)
     val sample2 = worker2.getSampleList(offset)
+
     val sortedSample = (sample1 ++ sample2).sortBy(entity => entity.head)
     val pivots = List(sortedSample(sortedSample.length / 2))
 
     val from1 = worker1.getToWorkerNFilePaths(new Pivots(pivots))
     val from2 = worker2.getToWorkerNFilePaths(new Pivots(pivots))
+
     val resultFilePath1 = worker1.mergeWrite(1,List(from1(0), from2(0)).flatten)
     val resultFilePath2 = worker2.mergeWrite(2,List(from1(1), from2(1)).flatten)
+
     val endTime = System.nanoTime()
     val duration = (endTime - startTime) / 1e6
     // this is for comparing before and after parallelization
     // to check whether parallelization really works
     // [1st] test time : 111675.2746 ms
-    // [2nd] test time : 116117.8385 ms
+    // [2nd] test time : 187.5186 ms
     println(s"test time : $duration ms")
 
     val resultEntities1 = worker1.readFile(resultFilePath1)
@@ -187,23 +192,26 @@ class WithoutNetworkTest extends FunSuite {
     val worker1 = new WorkerLogic(new worker.Config(args1))
     val worker2 = new WorkerLogic(new worker.Config(args2))
 
-    val offset = (worker1.getFileSize() + worker2.getFileSize()) / 1000
+    val offset = (worker1.getFileSize() + worker2.getFileSize()) / 10000
 
     val sample1 = worker1.getSampleList(offset)
     val sample2 = worker2.getSampleList(offset)
+
     val sortedSample = (sample1 ++ sample2).sortBy(entity => entity.head)
     val pivots = List(sortedSample(sortedSample.length / 2))
 
     val from1 = worker1.getToWorkerNFilePaths(new Pivots(pivots))
     val from2 = worker2.getToWorkerNFilePaths(new Pivots(pivots))
+
     val resultFilePath1 = worker1.mergeWrite(1,List(from1(0), from2(0)).flatten)
     val resultFilePath2 = worker2.mergeWrite(2,List(from1(1), from2(1)).flatten)
+
     val endTime = System.nanoTime()
     val duration = (endTime - startTime) / 1e6
     // this is for comparing before and after parallelization
     // to check whether parallelization really works
-    // [1st] test time : 111675.2746 ms
-    // [2nd] test time : 116117.8385 ms
+    // [1st] test time : 1032829.9738 ms
+    // [2nd] test time : 500.1778 ms
     println(s"test time : $duration ms")
 
     val resultEntities1 = worker1.readFile(resultFilePath1)
