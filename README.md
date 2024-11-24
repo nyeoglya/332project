@@ -16,13 +16,13 @@
 
 **Week 2 (Midterm week): Design ideas** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week2_report.html) / [Discussion1](https://github.com/nyeoglya/332project/discussions/3) [Discussion2](https://github.com/nyeoglya/332project/discussions/4) / [Test Code](https://github.com/nyeoglya/grpc-master-worker)
 
-**Week 3: Overall project design** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week3_report.html) / [Comment1](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11133877), [Comment2](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11133893), [Comment3](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11133896), [Comment4](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11134228)
+**Week 3: Overall project design** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week3_report.html) / [Comment1](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11133877) [Comment2](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11133893) [Comment3](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11133896) [Comment4](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11134228)
 
 **Week 4: Create test code** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week4_report.html) / [Discussion1](https://github.com/nyeoglya/332project/discussions/7) / [Image1](https://github.com/nyeoglya/332project/blob/main/report/worker_test_carprefer.png)
 
 **Week 5: Creating physical code and testing the system** [Report](https://github.com/nyeoglya/332project/blob/main/report/week5_report.pdf)
 
-**Week 6 (Progress Slides Deadline): Organizing Content, Preparing for Intermediate Presentation** [Presentation Slides](https://github.com/nyeoglya/332project/blob/main/presentation/)
+**Week 6 (Progress Slides Deadline): Organizing Content, Preparing for Intermediate Presentation** [Presentation Slides](https://github.com/nyeoglya/332project/blob/main/presentation/) / [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week6_report.html)
 
 **Week 7: Project Improvement and Maintenance**
 
