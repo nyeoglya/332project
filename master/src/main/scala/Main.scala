@@ -94,7 +94,7 @@ class MasterLogic(config: Config) {
     for {
       _ <- zio.Console.printLine("Requests samples to each workers")
       pivotCandicateList <- ZIO.foreachPar(clients.map(_.client)) { layer =>
-        collectSample(layer).provideLayer(layer)
+        collectSample.provideLayer(layer)
       }
 
       selectedPivots = selectPivots(pivotCandicateList)
@@ -105,7 +105,7 @@ class MasterLogic(config: Config) {
     // clients.foreach(client => sendPartitionToWorker(client.client, selectedPivots))
   }
   
-  def collectSample(client: Layer[Throwable, WorkerServiceClient]): ZIO[WorkerServiceClient, Throwable, Pivots] =
+  def collectSample: ZIO[WorkerServiceClient, Throwable, Pivots] =
     ZIO.serviceWithZIO[WorkerServiceClient] { workerServiceClient =>
       workerServiceClient.getSamples(SampleRequest(offset))
   }
