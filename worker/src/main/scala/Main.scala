@@ -4,15 +4,17 @@ import org.rogach.scallop._
 import zio._
 import zio.stream._
 import scalapb.zio_grpc.{ServerMain, ServiceList}
-import java.io.{File, PrintWriter}
+
+import java.io.{BufferedReader, BufferedWriter, File, FileReader, FileWriter, PrintWriter}
 import java.nio.file.{Files, Paths}
 import scala.io.Source
 import io.grpc.StatusException
 import io.grpc.ServerBuilder
 import io.grpc.protobuf.services.ProtoReflectionService
-import proto.common.{SampleRequest, Entity, DataResponse, SortResponse, Pivots}
+import proto.common.{DataResponse, Entity, Pivots, SampleRequest, SortResponse}
 import proto.common.ZioCommon.WorkerService
 import scalapb.zio_grpc
+
 import java.nio.file.Files
 import scala.collection.mutable.PriorityQueue
 import scala.language.postfixOps
@@ -22,8 +24,13 @@ import io.grpc.ManagedChannelBuilder
 import proto.common.WorkerData
 import proto.common.WorkerDataResponse
 import common.AddressParser
-import zio.stream.ZStream.HaltStrategy
+import zio.stream.ZStream.{HaltStrategy, fromQueue}
 import io.grpc.Status
+
+import java.awt.image.DataBufferDouble
+import java.nio.charset.StandardCharsets
+import scala.annotation.tailrec
+
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val masterAddress = trailArg[String](required = true, descr = "Mater address (e.g. 192.168.0.1:8000)", default = Some("127.0.0.1"))
@@ -103,41 +110,41 @@ trait WorkerServiceLogic {
     *
     * @return Int of bytes of file size
     */
-  def getFileSize(): Int
+  def getFileSize(): Long
 
-  /** Save Entities to file system
+  /** Get sample list
     * 
-    *
-    * @param data Stream of Entity
+    * @return List of head of sample entity
     */
-  def saveEntities(index: Integer, data: Stream[Throwable, Entity]): String
+  def getSampleList(offset: Int): List[String]
 
-  /** Get Stream of sample Entity datas
-    * 
-    * @return Stream of sample Entity to send
-    */
-  def getSampleList(offset: Integer): List[String]
+  /** Get file paths List
+   * n-th elem : file path List that will be sent to worker n
+   *
+   * @param partition
+   * @return
+   */
+  def getToWorkerNFilePaths(partition: Pivots): List[List[String]]
 
-  /** Get Stream of Entity to send other workers
-    *
-    * @param index
-    * @param partition
-    * @return
-    */
-  def getDataStream(partition: Pivots): List[Stream[Throwable, Entity]]
-
-  /** Sort multiple Entity Streams
-    *
-    * @param data
-    * @return
-    */
-  def sortStreams(data: List[Stream[Throwable, Entity]]): Stream[Throwable, Entity]
+  /** Merge given files using bottom up merge sort
+   *
+   * @param workerNum
+   * @param partitionedFilePaths
+   * @return
+   */
+  def mergeWrite(workerNum: Int, partitionedFilePaths : List[String]) : String
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 class WorkerLogic(config: Config) extends WorkerServiceLogic {
-
+  /**
+   * for test & comparing
+   */
+  val parallelMode = false
+  /**
+   * make newFile's path
+   */
   object PathMaker {
     def sortedSmallFile(filePath : String) : String = {
       val index = filePath.lastIndexOf('/')
@@ -147,252 +154,74 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       val index = filePath.lastIndexOf('/')
       config.outputDirectory.toOption.get + "/sampled_" + filePath.substring(index + 1)
     }
-    def mergedFile(index : Integer) : String = {
-      config.outputDirectory.toOption.get + "/mergedFile" + index.toString
+    def partitionedFile(workerNum: Int, filePath: String) ={
+      val index = filePath.lastIndexOf('/')
+      config.outputDirectory.toOption.get + "/to" + workerNum.toString + "_" + filePath.substring(index + 1)
+    }
+    def mergedFile(num: Int, filePath: String): String = {
+      val index = filePath.lastIndexOf('/')
+      config.outputDirectory.toOption.get + "/m" + num.toString + "_" + filePath.substring(index + 1)
     }
   }
 
-  def zio2entity(zio : ZIO[Any, Throwable, Entity]) : Entity =
-    Unsafe unsafe {
-      implicit unsafe =>
-        Runtime.default.unsafe.run(zio).getOrThrow()
+  /** you can exploit parallelism using this function
+   * achieve about 2 times higher overall performance
+   *
+   * @param target
+   * @param func
+   * @tparam A
+   * @tparam B
+   * @return
+   */
+  def useParallelism[A, B](target: List[A])(func: A => B): List[B] = {
+    val availableThreads = java.lang.Runtime.getRuntime.availableProcessors()
+    val parallel: ZIO[Any, Throwable, List[B]] = {
+      if(target.length <= availableThreads * 2)
+        ZIO.foreachPar(target)(item => ZIO.succeed(func(item)))
+      else
+        ZIO.foreach(target.grouped(availableThreads).toList)(chunk => ZIO.foreachPar(chunk){item => ZIO.succeed(func(item))}).map(_.flatten)
     }
+    if(parallelMode) {
+      Unsafe unsafe {implicit unsafe =>
+        Runtime.default.unsafe.run(parallel).getOrThrow()
+      }
+    }
+    else {
+      target.map(func)
+    }
+  }
+
+  /** read one entity
+   *
+   * @param reader
+   * @return read entity (success) | Entity("","") (fail)
+   */
+  def readEntity(reader: BufferedReader): Entity = {
+    val line = reader.readLine()
+    if(line == null) Entity("","")
+    else Entity(line.splitAt(10)._1, line.splitAt(10)._2 + java.lang.System.lineSeparator())
+  }
 
   def readFile(filePath : String) : List[Entity] = {
-    val source = Source.fromFile(filePath)
-    val lines = source.grouped(100).toList
-    source.close()
-    for {
-      line <- lines
-      (key, value) = line.splitAt(10)
-    } yield Entity(key.mkString, value.mkString)
+    val reader = new BufferedReader(new FileReader(filePath))
+    val entities = Iterator.continually(readEntity(reader)).takeWhile(_ != Entity("","")).toList
+    reader.close()
+    entities
   }
 
   def writeFile(filePath : String, data : List[Entity]) : Unit = {
-    val file = new File(filePath)
-    val writer = new PrintWriter(file)
-    try {
-      data.foreach(entity => {
-        writer.write(entity.head)
-        writer.write(entity.body)
-      })
-    } finally {
-      writer.close()
-    }
+    val writer = new BufferedWriter(new FileWriter(filePath))
+    data.foreach(entity => {writer.write(entity.head); writer.write(entity.body)})
+    writer.close()
   }
 
-  def sortSmallFile(filePath : String) : String = {
-    val data = readFile(filePath)
-    val sortedData = data.sortBy(entity => entity.head)
-    val sortedFilePath = PathMaker.sortedSmallFile(filePath)
-    writeFile(sortedFilePath, sortedData)
-    sortedFilePath
-  }
-
-  def produceSampleFile(filePath : String, stride : Integer) : String = {
-    assert(stride > 0)
-    val data = readFile(filePath)
-    val sampledData = data.zipWithIndex.collect{ case (entity, index) if index % stride == 0 => entity}
-    val sampledFilePath = PathMaker.sampleFile(filePath)
-    writeFile(sampledFilePath, sampledData)
-    sampledFilePath
-  }
-
-  def sampleFilesToSampleList(filePaths : List[String]) : List[String] = {
-    filePaths.flatMap(path => readFile(path)).map(entity => entity.head)
-  }
-
-  def splitFileIntoPartitionStreams(filePath : String, pivots : List[String]) : List[Stream[Throwable, Entity]] = {
-    assert(pivots.nonEmpty)
-    val data = readFile(filePath)
-    def splitUsingPivots(data : List[Entity], pivots: List[String]) : List[List[Entity]] = pivots match {
-      case Nil => List(data)
-      case pivot::pivots =>
-        data.takeWhile(entity => entity.head < pivot) :: splitUsingPivots(data.dropWhile(entity => entity.head < pivot), pivots)
-    }
-    splitUsingPivots(data, pivots).map(entityList => ZStream.fromIterable(entityList))
-  }
-
-  def mergeStreams(partitionStreams : List[Stream[Throwable, Entity]]) : Stream[Throwable, Entity] = {
-    implicit val entityOrdering : Ordering[(Entity, Int)] = Ordering.by(_._1.head)
-    val minHeap : PriorityQueue[(Entity, Int)] = PriorityQueue.empty(entityOrdering.reverse)
-    partitionStreams.zipWithIndex foreach {
-      case (stream, index) =>
-        val head = zio2entity(stream.runHead.map(_.getOrElse(Entity("", ""))))
-        if(head != Entity("", ""))
-          minHeap.enqueue((head, index))
-    }
-    def makeMergeStream(streams : List[Stream[Throwable, Entity]], accStream : Stream[Throwable, Entity]) : Stream[Throwable, Entity] = {
-      if(minHeap.isEmpty) accStream
-      else {
-        val (minEntity, minIndex) = minHeap.dequeue()
-        val head = zio2entity(streams(minIndex).runHead.map(_.getOrElse(Entity("", ""))))
-        val tailStream = streams(minIndex).drop(1)
-        if (head != Entity("", "")) minHeap.enqueue((head, minIndex))
-        makeMergeStream(streams.updated(minIndex, tailStream), accStream ++ ZStream.succeed(minEntity))
-      }
-    }
-    makeMergeStream(partitionStreams.map(_.drop(1)), ZStream.empty)
-  }
-
-  val originalSmallFilePaths : List[String] = {
-    config.inputDirectories.toOption.getOrElse(List(""))
-      .flatMap{ directoryPath =>
-        val directory = new File(directoryPath)
-        directory.listFiles.map(_.getPath.replace("\\", "/")).toList
-      }
-  }
-
-  val sortedSmallFilePaths : List[String] = originalSmallFilePaths.map(path => sortSmallFile(path))
-
-  // TODO: Read files from storage
-  def inputEntities: Stream[Throwable, Entity] =
-    ZStream.fromIterable(originalSmallFilePaths).flatMap(path => ZStream.fromIterable(readFile(path)))
-
-  def saveEntities(index: Integer, data: Stream[Throwable,Entity]): String = {
-    val filePath = PathMaker.mergedFile(index)
-    val file = new File(filePath)
-    val writer = new PrintWriter(file)
-    try {
-      Unsafe unsafe {
-        implicit unsafe =>
-          Runtime.default.unsafe.run{
-            data.runForeach(entity => {
-              writer.write(entity.head)
-              writer.write(entity.body)
-              ZIO.succeed(())
-            })
-          }
-          filePath
-      }
-    } finally {
-      writer.close()
-    }
-  }
-
-  def getFileSize(): Int = originalSmallFilePaths.map(path => Files.size(Paths.get(path))).sum.toInt
-  def getDataStream(partition: Pivots): List[Stream[Throwable,Entity]] = {
-    val partitionStreams : List[List[Stream[Throwable, Entity]]] =
-      sortedSmallFilePaths.map(path => splitFileIntoPartitionStreams(path, partition.pivots.toList))
-    val toWorkerStreams = for {
-      n <- (0 to partition.pivots.length).toList
-      toN = partitionStreams.map(_(n))
-    } yield toN
-    toWorkerStreams.map(toWorkerN => mergeStreams(toWorkerN))
-  }
-  def getSampleList(offset: Integer): List[String] = {
-    val sampleFilePaths = sortedSmallFilePaths.map(path => produceSampleFile(path, offset))
-    sampleFilesToSampleList(sampleFilePaths)
-  }
-  def sortStreams(data: List[Stream[Throwable,Entity]]): Stream[Throwable,Entity] = {
-    mergeStreams(data)
-  }
-}
-
-/** Worker's Main function
- *
- *  모드에 따라 파일의 양식, path 위치가 다르기에, 편의를 위해 [[readFile]], [[writeFile]], [[PathMaker]] 를 정의해 사용하였다.
- *
- *  주요 함수들은 아래와 같다.
- *
- *  [[sortSmallFile]]
- *  [[produceSampleFile]]
- *  [[sampleFilesToSampleStream]]
- *  [[splitFileIntoPartitionStreams]]
- *  [[mergeBeforeShuffle]]
- *  [[mergeAfterShuffle]]
- *
- *  각각은 그저 일반 함수처럼 동작한다.
- *  위의 함수들을 병렬적으로 돌리고, 기다리는 작업은 밑의 "real workflow begin from here" 부분에서 시행한다.
- *
- *  - [ ] TODO #1 : 병렬화
- *
- *  - [ ] TODO #2 : 네트워크 서비스와의 연결
- *
- *  - [x] TODO #3 : 중간 파일 지우기
- *
- *  - [x] TODO #4 : sample 파일 key 로만 구성
- *
- *  - [ ] TODO #5 : error handling 추가
- *
- */
-/*object WorkerCodes extends App {
-  val config = new Config(args)
-
-  config.inputDirectories.toOption.foreach(dirs => println(s"Input Directories: ${dirs.mkString(", ")}"))
-  config.outputDirectory.toOption.foreach(dir => println(s"Output Directory: $dir"))
-
-
-  /** read file from filePath and return its data in a list of Entity
-   *  depending on mode, it works differently
+  /** sort given file in memory and save them on new file
    *
-   * @param filePath path of the file to read
-   * @return data of the file read
-   */
-  def readFile(filePath : String) : List[Entity] = {
-    val source = Source.fromFile(filePath)
-    val lines = source.grouped(100).toList
-    source.close()
-    for {
-      line <- lines
-      (key, value) = line.splitAt(10)
-    } yield Entity(key.mkString, value.mkString)
-  }
-
-  /** write data to new file
-   *  depending on mode, it works differently
-   *
-   * @param filePath path of the file to write
-   * @param data a list of entity to write
-   */
-  def writeFile(filePath : String, data : List[Entity]) : Unit = {
-    val file = new File(filePath)
-    val writer = new PrintWriter(file)
-    try {
-      data.foreach(entity => {
-        writer.write(entity.head)
-        writer.write(entity.body)
-      })
-    } finally {
-      writer.close()
-    }
-  }
-
-  /** write data to new file through stream
-   *  depending on mode, it works differently
-   *
-   *  because size of file is limited when we write file in a normal way,
-   *  we introduce stream to write huge entities on one single file
-   *
-   * @param filePath path of the file to write
-   * @param data a list of entity to write(huge)
-   */
-  def writeFileViaStream(filePath : String, data : Stream[Exception, Entity]) : Unit = {
-    val file = new File(filePath)
-    val writer = new PrintWriter(file)
-    try {
-      Unsafe unsafe {
-        implicit unsafe =>
-          Runtime.default.unsafe.run{
-            data.runForeach(entity => {
-              writer.write(entity.head)
-              writer.write(entity.body)
-              ZIO.succeed(())
-            })
-          }
-      }
-    } finally {
-      writer.close()
-    }
-  }
-
-  /** this function literally sort small File
-   *  and save sorted data in somewhere and return that path
-   *
-   * @param filePath original file's path
+   * @param filePath
    * @return sorted file's path
    */
   def sortSmallFile(filePath : String) : String = {
+    assert(Files.size(Paths.get(filePath)) < 50000000)
     val data = readFile(filePath)
     val sortedData = data.sortBy(entity => entity.head)
     val sortedFilePath = PathMaker.sortedSmallFile(filePath)
@@ -400,111 +229,110 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     sortedFilePath
   }
 
-  /** this function sample data from given file
-   *  by striding @stride entities
+  /** make sample file from given file by read with an given offset
+   * after change structure
+   * from   file -> List -> file
+   * to     file -> file
+   * achieve 10% higher performance
    *
-   * @param filePath given file's path(sorted)
-   * @param stride
-   * @return new sample file's path
+   * @param filePath
+   * @param offset
+   * @return sample file's path
    */
-  def produceSampleFile(filePath : String, stride : Int) : String = {
-    assert(stride > 0)
-    val data = readFile(filePath)
-    val sampledData = data.zipWithIndex.collect{ case (entity, index) if index % stride == 0 => entity}
+  def produceSampleFile(filePath : String, offset : Int) : String = {
+    assert(offset > 0)
+    val reader = new BufferedReader(new FileReader(filePath))
     val sampledFilePath = PathMaker.sampleFile(filePath)
-    writeFile(sampledFilePath, sampledData)
+    val writer = new BufferedWriter(new FileWriter(sampledFilePath))
+    @tailrec
+    def readOffsetWrite(count: Int): Unit = {
+      val entity = readEntity(reader)
+      if(entity == Entity("","")) ()
+      else {
+        if(count % offset == 0){
+          writer.write(entity.head)
+          writer.write(entity.body)
+        }
+        readOffsetWrite(count + 1)
+      }
+    }
+    readOffsetWrite(0)
+    reader.close()
+    writer.close()
     sampledFilePath
   }
 
-  /** this function merge given sample files
-   *  and return a single merged sample data(in list)
-   *  here, 'merge' does not consider ordering. it just collects them
+  /** split given file into N partitioned files using given pivots
+   * after change function structure
+   * from   file -> List -> files
+   * to     file -> files
+   * achieve about 2 times higher performance in partitioning
    *
-   * @param filePaths list of given sample file
-   * @return merged sample data
+   * @param filePath
+   * @param pivots
+   * @return list of partitioned file's path
    */
-  def sampleFilesToSampleStream(filePaths : List[String]) : List[String] = {
-    filePaths.flatMap(path => readFile(path)).map(entity => entity.head)
-  }
-
-  /** this function split given file into several mini streams using pivots
-   *
-   * @param filePath target file's path
-   * @param pivots list of pivot
-   * @return list of mini streams
-   */
-  def splitFileIntoPartitionStreams(filePath : String, pivots : List[String]) : List[Stream[Exception, Entity]] = {
+  def makePartitionedFiles(filePath : String, pivots : List[String]) : List[String] = {
     assert(pivots.nonEmpty)
-    val data = readFile(filePath)
-    def splitUsingPivots(data : List[Entity], pivots: List[String]) : List[List[Entity]] = pivots match {
-      case Nil => List(data)
-      case pivot::pivots =>
-        data.takeWhile(entity => entity.head < pivot) :: splitUsingPivots(data.dropWhile(entity => entity.head < pivot), pivots)
-    }
-    splitUsingPivots(data, pivots).map(entityList => ZStream.fromIterable(entityList))
-  }
+    val reader = new BufferedReader(new FileReader(filePath))
 
-  /** this function extract entity from ZIO value
-   *
-   * @param zio original ZIO value
-   * @return entity that had been in ZIO
-   */
-  def zio2entity(zio : ZIO[Any, Exception, Entity]) : Entity =
-    Unsafe unsafe {
-      implicit unsafe =>
-        Runtime.default.unsafe.run(zio).getOrThrow()
-    }
-
-  /** this function merge list of streams into a single sorted stream
-   *  all streams in input want to go same worker so we'll make them one
-   *  using priorityQueue, we can efficiently merge streams.
-   *  to access entity in ZStream, we use zio2entity function
-   *
-   * @param partitionStreams list of partitioned streams
-   * @return a merged stream
-   */
-  def mergeBeforeShuffle(partitionStreams : List[Stream[Exception, Entity]]) : Stream[Exception, Entity] = {
-    implicit val entityOrdering : Ordering[(Entity, Int)] = Ordering.by(_._1.head)
-    val minHeap : PriorityQueue[(Entity, Int)] = PriorityQueue.empty(entityOrdering.reverse)
-    partitionStreams.zipWithIndex foreach {
-      case (stream, index) =>
-        val head = zio2entity(stream.runHead.map(_.getOrElse(Entity("", ""))))
-        if(head != Entity("", ""))
-          minHeap.enqueue((head, index))
-    }
-    def makeMergeStream(streams : List[Stream[Exception, Entity]], accStream : Stream[Exception, Entity]) : Stream[Exception, Entity] = {
-      if(minHeap.isEmpty) accStream
+    @tailrec
+    def readPartitionWrite(acc: List[String], index: Int, writer: BufferedWriter): List[String] = {
+      val entity = readEntity(reader)
+      if(entity == Entity("","")) {
+        writer.close()
+        val oldFilePath = PathMaker.partitionedFile(index, filePath)
+        acc ++ List(oldFilePath)
+      }
+      else if(index >= pivots.length || entity.head < pivots(index)) {
+        writer.write(entity.head)
+        writer.write(entity.body)
+        readPartitionWrite(acc, index, writer)
+      }
       else {
-        val (minEntity, minIndex) = minHeap.dequeue()
-        val head = zio2entity(streams(minIndex).runHead.map(_.getOrElse(Entity("", ""))))
-        val tailStream = streams(minIndex).drop(1)
-        if (head != Entity("", "")) minHeap.enqueue((head, minIndex))
-        makeMergeStream(streams.updated(minIndex, tailStream), accStream ++ ZStream.succeed(minEntity))
+        writer.close()
+        val oldFilePath = PathMaker.partitionedFile(index, filePath)
+        val newFilePath = PathMaker.partitionedFile(index + 1, filePath)
+        val newAcc = acc ++ List(oldFilePath)
+        val newWriter = new BufferedWriter(new FileWriter(newFilePath))
+        newWriter.write(entity.head)
+        newWriter.write(entity.body)
+        readPartitionWrite(newAcc, index + 1, newWriter)
       }
     }
-    makeMergeStream(partitionStreams.map(_.drop(1)), ZStream.empty)
+    val writer = new BufferedWriter(new FileWriter(PathMaker.partitionedFile(0, filePath)))
+    val result = readPartitionWrite(List.empty[String], 0, writer)
+    reader.close()
+    result
   }
 
-  /** this function merge list of streams into a single sorted stream(same with mergeBeforeShuffle)
-   *  and write this huge stream into single file and return its path
-   *
-   * @param workerStreams list of streams that sent by other workers
-   * @return merged file's path
-   */
-  def mergeAfterShuffle(workerStreams : List[Stream[Exception, Entity]]) : String = {
-    val mergedStream = mergeBeforeShuffle(workerStreams)
-    val filePath = PathMaker.mergedFile()
-    writeFileViaStream(filePath, mergedStream)
+  def mergeTwoFile(num: Int, path1: String, path2: String): String = {
+    val reader1 = new BufferedReader(new FileReader(path1))
+    val reader2 = new BufferedReader(new FileReader(path2))
+    val filePath = PathMaker.mergedFile(num, path1)
+    val writer = new BufferedWriter(new FileWriter(filePath))
+    @tailrec
+    def merge(entity1: Entity, entity2: Entity): Unit = {
+      if(entity1 == Entity("","") && entity2 == Entity("","")) ()
+      else if(entity1.head < entity2.head && entity1 != Entity("","") || entity2 == Entity("","")) {
+        writer.write(entity1.head)
+        writer.write(entity1.body)
+        merge(readEntity(reader1), entity2)
+      }
+      else {
+        writer.write(entity2.head)
+        writer.write(entity2.body)
+        merge(entity1, readEntity(reader2))
+      }
+    }
+    merge(readEntity(reader1), readEntity(reader2))
+    writer.close()
+    reader1.close()
+    reader2.close()
+    Files.delete(Paths.get(path1))
+    Files.delete(Paths.get(path2))
     filePath
   }
-
-  val machineNumber : Int = 1
-  val numberOfFiles : Int = 1
-  val pivotList :List[String] = List("")
-  val workerIpList : List[String] = List("")
-  val sampleOffset : Int = 100
-
-  /// real workflow begin from here //////////////////////////////////////////////////////////////////////////////////
 
   val originalSmallFilePaths : List[String] = {
     config.inputDirectories.toOption.getOrElse(List(""))
@@ -513,47 +341,42 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
         directory.listFiles.map(_.getPath.replace("\\", "/")).toList
       }
   }
-  // send data to master and wait 'getSample' command from master
-  /**
-   * TODO : make it parallel
-   */
-  val sortedSmallFilePaths : List[String] = originalSmallFilePaths.map(path => sortSmallFile(path))
 
-  /**
-   * TODO : make it parallel
-   */
-  val sampleFilePaths : List[String] = sortedSmallFilePaths.map(path => produceSampleFile(path, sampleOffset))
+  val sortedSmallFilePaths: List[String] = useParallelism(originalSmallFilePaths)(sortSmallFile)
 
-  val sampleStream : List[String] = sampleFilesToSampleStream(sampleFilePaths)
+  // TODO: Read files from storage
 
-  sampleFilePaths.foreach(path => new File(path).delete())
+  def inputEntities: Stream[Throwable, Entity] =
+    ZStream.fromIterable(originalSmallFilePaths).flatMap(path => ZStream.fromIterable(readFile(path)))
 
-  // send sampleStream and wait pivotList
-  // after receive pivotList, send stream request to other workers
+  def getFileSize(): Long = originalSmallFilePaths.map(path => Files.size(Paths.get(path))).sum.toLong
+  def getSampleList(offset: Int): List[String] = {
+    val sampleFilePaths = useParallelism(sortedSmallFilePaths)(produceSampleFile(_, offset))
+    sampleFilePaths.flatMap(path => readFile(path)).map(entity => entity.head)
+  }
+  def getToWorkerNFilePaths(partition: Pivots): List[List[String]] = {
+    val partitionFilePaths = useParallelism(sortedSmallFilePaths)(makePartitionedFiles(_, partition.pivots.toList))
+    val toWorkerFilePaths = for {
+      n <- (0 to partition.pivots.length).toList
+      toN = partitionFilePaths.map(_(n))
+    } yield toN
+    toWorkerFilePaths
+  }
 
-  /**
-   * TODO : make it parallel
-   */
-  val partitionStreams : List[List[Stream[Exception, Entity]]] =
-    sortedSmallFilePaths.map(path => splitFileIntoPartitionStreams(path, pivotList))
-
-  val toWorkerStreams = for {
-    n <- (0 to pivotList.length).toList
-    toN = partitionStreams.map(_(n))
-  } yield toN
-
-
-  /**
-   * TODO : make it parallel
-   */
-  val beforeShuffleStreams : List[Stream[Exception, Entity]] =
-    toWorkerStreams.map(toWorkerN => mergeBeforeShuffle(toWorkerN))
-
-  // wait until receive all stream from other workers
-  val shuffledStreams = List(ZStream.succeed(Entity("","")))
-
-
-  val mergedFilePath : String = mergeAfterShuffle(shuffledStreams)
-
-  sortedSmallFilePaths.foreach(path => new File(path).delete())
-}*/
+  def mergeWrite(workerNum: Int, partitionedFilePaths : List[String]) : String = {
+    @tailrec
+    def mergeLevel(filePaths: List[String]): String = {
+      if(filePaths.length == 1) filePaths.head
+      else {
+        val nextFilePaths =
+          useParallelism(filePaths.sliding(2,2).toList.zipWithIndex){
+            case (paths, index) =>
+              if (paths.length == 1) paths.head
+              else mergeTwoFile(index, paths(0), paths(1))
+          }
+        mergeLevel(nextFilePaths)
+      }
+    }
+    mergeLevel(partitionedFilePaths)
+  }
+}
