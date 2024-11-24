@@ -31,7 +31,7 @@ object Main extends ZIOAppDefault {
 
   override def run: ZIO[Environment with ZIOAppArgs with Scope,Any,Any] = (for {
     _ <- zio.Console.printLine(s"Master is running on port ${port}")
-    result <- serverLive.launch.exitCode
+    result <- serverLive.launch
   } yield result).provideSomeLayer[ZIOAppArgs](
     ZLayer.fromZIO( for {
         args <- getArgs
@@ -103,7 +103,8 @@ class MasterLogic(config: Config) {
       _ <- zio.Console.printLine("Requests samples to each workers")
       pivotCandicateList <- ZIO.foreachPar(clients.map(_.client)) { layer =>
           collectSample(layer).provideLayer(layer)
-        }
+      }
+      _ <- zio.Console.printLine(pivotCandicateList.head.pivots.take(30))
     } yield pivotCandicateList
 
     // ZIO는 실제로 사용되는 시점에서 비동기적으로 실행됨
@@ -143,12 +144,12 @@ class MasterLogic(config: Config) {
     } yield Pivots(pivots = distinctList)
   }
 
-  def sendPartitionToWorker(client: Layer[Throwable, WorkerServiceClient],
-                          pivots: ZIO[Any, Throwable, Pivots]): ZIO[Any, Throwable, Unit] = for {
-  pivotsData <- pivots
-  workerServiceClient <- ZIO.scoped(client.build).map(_.get) // ZEnvironment에서 WorkerServiceClient 추출
-  shuffleRequest = ShuffleRequest(pivots = Some(pivotsData), workerAddresses = workerIPList)
-  _ <- workerServiceClient.startShuffle(shuffleRequest).mapError(e => new RuntimeException(s"Failed to send ShuffleRequest: ${e.getMessage}"))
-} yield ()
-
+  def sendPartitionToWorker(
+    client: Layer[Throwable, WorkerServiceClient],
+    pivots: ZIO[Any, Throwable, Pivots]): ZIO[Any, Throwable, Unit] = for {
+      pivotsData <- pivots
+      workerServiceClient <- ZIO.scoped(client.build).map(_.get) // ZEnvironment에서 WorkerServiceClient 추출
+      shuffleRequest = ShuffleRequest(pivots = Some(pivotsData), workerAddresses = workerIPList)
+      _ <- workerServiceClient.startShuffle(shuffleRequest).mapError(e => new RuntimeException(s"Failed to send ShuffleRequest: ${e.getMessage}"))
+    } yield ()
 }
