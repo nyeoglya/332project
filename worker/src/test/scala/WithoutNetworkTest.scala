@@ -9,7 +9,6 @@ import common._
 import proto.common.{Entity, Pivots}
 import zio.stream.{ZPipeline, ZStream}
 import zio.{Ref, Runtime, Unsafe, ZIO, ZLayer}
-import zio.test._
 
 import java.io.File
 import java.nio.file.{Files, Paths}
@@ -154,12 +153,16 @@ class WithoutNetworkTest extends FunSuite {
     val end3 = System.nanoTime()
     val fromN = useParallelism(workers)(_.getToWorkerNFilePaths(new Pivots(pivots)))
     val end4 = System.nanoTime()
-    val toN = for {
-      n <- (0 until workerNum).toList
-      toN = fromN.map(_(n))
-    } yield toN
+    val toN: List[List[String]] =
+      (for {
+        n <- (0 until workerNum).toList
+        toN = fromN.map(_(n))
+      } yield toN).map(_.flatten)
 
-    val resultFilePaths = useParallelism(workers.zipWithIndex){case (worker, index) => worker.mergeWrite(index, toN(index).flatten)}
+    val resultFilePaths = useParallelism(workers.zipWithIndex){case (worker, index) =>
+      toN(index).map{path => worker.writeNetworkFile(worker.readFile(path))}
+      worker.mergeWrite(index)
+    }
      // workers.zipWithIndex.map{case (worker, index) => worker.mergeWrite(index, toN(index).flatten)}
     val end5 = System.nanoTime()
     val workerTime = (end0 - startTime) / 1e6
@@ -247,14 +250,16 @@ class WithoutNetworkTest extends FunSuite {
   test("mergeWrite test : length ") {
     val worker1 = new WorkerLogic(new worker.Config(worker1Arg))
     val originalLength = worker1.sortedSmallFilePaths.map(path => worker1.readFile(path).length).sum
-    val mergedFile = worker1.mergeWrite(1, worker1.sortedSmallFilePaths)
+    worker1.sortedSmallFilePaths.foreach(path => worker1.writeNetworkFile(worker1.readFile(path)))
+    val mergedFile = worker1.mergeWrite(1)
     val mergedLength = worker1.readFile(mergedFile).length
     assert(originalLength == mergedLength)
   }
 
   test("mergeStreams test : sorted ") {
     val worker1 = new WorkerLogic(new worker.Config(worker1Arg))
-    val mergedFile = worker1.mergeWrite(1, worker1.sortedSmallFilePaths)
+    worker1.sortedSmallFilePaths.foreach(path => worker1.writeNetworkFile(worker1.readFile(path)))
+    val mergedFile = worker1.mergeWrite(1)
     val mergedData = worker1.readFile(mergedFile)
     assert(isDataSorted(mergedData))
   }
