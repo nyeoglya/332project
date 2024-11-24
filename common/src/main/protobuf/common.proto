@@ -9,7 +9,7 @@ service MasterService {
 service WorkerService {
 	rpc GetSamples (SampleRequest) returns (Pivots);
 	rpc StartShuffle (ShuffleRequest) returns (SortResponse);
-	rpc SendData (stream Entity) returns (DataResponse);
+	rpc SendData (DataRequest) returns (DataResponse);
 }
 
 message WorkerData {
@@ -41,4 +41,9 @@ message SampleResponse {
 }
 
 message SortResponse {}
+
+message DataRequest {
+	bool has_next = 1;
+	repeated Entity payload = 2;
+}
 message DataResponse {}
