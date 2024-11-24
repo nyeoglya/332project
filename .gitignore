@@ -24,3 +24,6 @@ metals.sbt
 
 # virtual machine crash logs
 hs_err_pid*
+
+# test files
+worker/src/test/withoutNetworkTestFiles
