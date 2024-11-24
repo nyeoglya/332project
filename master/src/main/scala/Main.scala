@@ -66,18 +66,18 @@ object Main extends ZIOAppDefault {
 }
 
 class MasterLogic(config: Config) {
-  case class WorkerClient(val client: Layer[Throwable, WorkerServiceClient], val size: BigInt)
+  case class WorkerClient(val client: Layer[Throwable, WorkerServiceClient], val size: Long)
   
   var workerIPList: List[String] = List()
   var clients: List[WorkerClient] = List()
 
-  lazy val offset: Int = 1 + (clients.map(_.size).sum / (1024 * 1024)).toInt
+  lazy val offset: Int = List(1, (clients.map(_.size).sum / (1024 * 1024)).toInt).max
 
   /** Add new client connection to MasterLogic
     *
     * @param clientAddress address of client
     */
-  def addClient(workerAddress: String, workerSize: BigInt): IO[Throwable, Any] = {
+  def addClient(workerAddress: String, workerSize: Long): IO[Throwable, Any] = {
     if (clients.size >= config.workerNum.toOption.get) {
       println(s"Worker attached: ${workerAddress} but rejected")
       ZIO.fail(new StatusException(Status.UNAVAILABLE))
@@ -102,46 +102,43 @@ class MasterLogic(config: Config) {
     for {
       _ <- zio.Console.printLine("Requests samples to each workers")
       pivotCandicateList <- ZIO.foreachPar(clients.map(_.client)) { layer =>
-          collectSample(layer).provideLayer(layer)
+        collectSample.provideLayer(layer)
       }
-      _ <- zio.Console.printLine(pivotCandicateList.head.pivots.take(30))
+
+      selectedPivots = selectPivots(pivotCandicateList)
+      _ <- zio.Console.printLine(selectedPivots.pivots)
+
     } yield pivotCandicateList
-
-    // ZIO는 실제로 사용되는 시점에서 비동기적으로 실행됨
-
-    // val selectedPivots = selectPivots(pivotCandicateList)
 
     // clients.foreach(client => sendPartitionToWorker(client.client, selectedPivots))
   }
   
-  def collectSample(client: Layer[Throwable, WorkerServiceClient]): ZIO[WorkerServiceClient, Throwable, Pivots] =
+  def collectSample: ZIO[WorkerServiceClient, Throwable, Pivots] =
     ZIO.serviceWithZIO[WorkerServiceClient] { workerServiceClient =>
       workerServiceClient.getSamples(SampleRequest(offset))
   }
 
-  // TODO: ZIO가 아니라 평범하게 List[Pivots]로 수정 요망. (코드 내부에서 비동기적으로 돌아가는 부분이 없으므로)
-  def selectPivots(pivotCandicateZIOList: ZIO[Any, Throwable, List[Pivots]]): ZIO[Any, Throwable, Pivots] = {
-    val pivotCandicateList: ZIO[Any, Throwable, List[String]] = pivotCandicateZIOList.map { pivots =>
-      pivots.flatMap(_.pivots)
+  def selectPivots(pivotCandidateListOriginal: List[Pivots]): Pivots = {
+    assert { !pivotCandidateListOriginal.isEmpty }
+    assert { !clients.isEmpty }
+    assert { pivotCandidateListOriginal.length == clients.length }
+
+    val pivotCandidateList: List[String] = pivotCandidateListOriginal.flatMap(_.pivots)
+
+    val pivotCandidateListSize: Long = pivotCandidateList.size
+    val totalDataSize: Long = clients.map(_.size).sum
+
+    assert { totalDataSize != 0 }
+
+    val clientSizes = clients.map(_.size)
+    val pivotIndices: List[Int] = clientSizes match {
+      case _ :: Nil => Nil
+      case _ => clientSizes.init.scanLeft(0) { (acc, workerSize) =>
+        acc + (pivotCandidateListSize * (workerSize.toDouble / totalDataSize.toDouble)).toInt
+      }.tail
     }
 
-    val pivotCandicateListSize: ZIO[Any, Throwable, BigInt] = pivotCandicateList.map(_.size)
-    val totalDataSize: BigInt = clients.map(_.size).sum
-
-    val pivotIndices: ZIO[Any, Throwable, List[Int]] = for {
-      candidateListSize <- pivotCandicateListSize
-      result <- ZIO.succeed(
-        clients.map(_.size).scanLeft(0) { (acc, workerSize) =>
-          acc + (candidateListSize * (workerSize / totalDataSize)).toInt
-        }.tail
-      )
-    } yield result
-
-    for {
-      pivotList <- pivotCandicateList
-      indices <- pivotIndices
-      distinctList = indices.map(idx => pivotList(idx)).distinct
-    } yield Pivots(pivots = distinctList)
+    Pivots(pivotIndices.map(idx => pivotCandidateList(idx)))
   }
 
   def sendPartitionToWorker(

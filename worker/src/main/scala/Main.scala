@@ -135,7 +135,11 @@ trait WorkerServiceLogic {
    * @param partitionedFilePaths
    * @return
    */
-  def mergeWrite(workerNum: Int, partitionedFilePaths : List[String]) : String
+  def mergeWrite(workerNum: Int) : String
+
+  def readFile(filePath : String) : List[Entity]
+
+  def writeNetworkFile(data: List[Entity]): Unit
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -145,6 +149,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
    * for test & comparing
    */
   val parallelMode = false
+
   /**
    * make newFile's path
    */
@@ -160,6 +165,9 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     def partitionedFile(workerNum: Int, filePath: String) ={
       val index = filePath.lastIndexOf('/')
       config.outputDirectory.toOption.get + "/to" + workerNum.toString + "_" + filePath.substring(index + 1)
+    }
+    def shuffledFile(num: Int): String = {
+      config.outputDirectory.toOption.get + "/shuffled_" + num.toString + ".txt"
     }
     def mergedFile(num: Int, filePath: String): String = {
       val index = filePath.lastIndexOf('/')
@@ -216,6 +224,13 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     val writer = new BufferedWriter(new FileWriter(filePath))
     data.foreach(entity => {writer.write(entity.head); writer.write(entity.body)})
     writer.close()
+  }
+
+  def writeNetworkFile(data: List[Entity]): Unit = {
+    val filePath = PathMaker.shuffledFile(shuffledFileCount)
+    writeFile(filePath, data)
+    shuffledFilePaths = filePath::shuffledFilePaths
+    shuffledFileCount = shuffledFileCount + 1
   }
 
   /** sort given file in memory and save them on new file
@@ -344,6 +359,9 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
 
   val sortedSmallFilePaths: List[String] = useParallelism(originalSmallFilePaths)(sortSmallFile)
 
+  var shuffledFileCount: Int = 0
+  var shuffledFilePaths: List[String] = List.empty[String]
+
   // TODO: Read files from storage
 
   def inputEntities: Stream[Throwable, Entity] =
@@ -363,7 +381,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     toWorkerFilePaths
   }
 
-  def mergeWrite(workerNum: Int, partitionedFilePaths : List[String]) : String = {
+  def mergeWrite(workerNum: Int) : String = {
     @tailrec
     def mergeLevel(filePaths: List[String]): String = {
       if(filePaths.length == 1) filePaths.head
@@ -377,6 +395,6 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
         mergeLevel(nextFilePaths)
       }
     }
-    mergeLevel(partitionedFilePaths)
+    mergeLevel(shuffledFilePaths)
   }
 }

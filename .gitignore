@@ -26,4 +26,15 @@ metals.sbt
 hs_err_pid*
 
 # test files
-worker/src/test/withoutNetworkTestFiles
+worker/src/test/withoutNetworkTestFiles/worker1/
+worker/src/test/withoutNetworkTestFiles/worker2/
+worker/src/test/withoutNetworkTestFiles/worker3/
+worker/src/test/withoutNetworkTestFiles/worker4/
+worker/src/test/withoutNetworkTestFiles/worker5/
+worker/src/test/withoutNetworkTestFiles/worker6/
+worker/src/test/withoutNetworkTestFiles/worker7/
+worker/src/test/withoutNetworkTestFiles/worker8/
+worker/src/test/withoutNetworkTestFiles/worker9/
+worker/src/test/withoutNetworkTestFiles/worker10/
+worker/src/test/withoutNetworkTestFiles/mergedFile
+
