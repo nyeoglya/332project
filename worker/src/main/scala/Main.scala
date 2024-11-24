@@ -30,6 +30,7 @@ import io.grpc.Status
 import java.awt.image.DataBufferDouble
 import java.nio.charset.StandardCharsets
 import scala.annotation.tailrec
+import proto.common.DataRequest
 
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
@@ -96,11 +97,13 @@ object Main extends ZIOAppDefault {
         samples = service.getSampleList(request.offset.toInt)
         result = Pivots(samples)
       } yield result
+
       result.mapError(e => new StatusException(Status.INTERNAL))
     }
 
     def startShuffle(request: ShuffleRequest): IO[StatusException,SortResponse] = ???
-    def sendData(request: Stream[StatusException,Entity]): IO[StatusException,DataResponse] = ??? }
+    def sendData(request: DataRequest): IO[StatusException,DataResponse] = ???
+  }
 }
 
 trait WorkerServiceLogic {
@@ -246,10 +249,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
 
   /** make sample file from given file by read with an given offset
    * after change structure
-   * from   file -> List -> file
-   * to     file -> file
-   * achieve 10% higher performance
-   *
+   * from   file -> List -
    * @param filePath
    * @param offset
    * @return sample file's path
