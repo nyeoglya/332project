@@ -145,7 +145,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   /**
    * for test & comparing
    */
-  val parallelMode = false
+  val parallelMode = true
 
   /**
    * make newFile's path
