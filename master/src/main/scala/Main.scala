@@ -68,7 +68,7 @@ class MasterLogic(config: Config) {
   var workerIPList: List[String] = List()
   var clients: List[WorkerClient] = List()
 
-  lazy val offset: Int = 1 + (clients.map(_.size).sum / (1024 * 1024)).toInt
+  lazy val offset: Int = List(1, (clients.map(_.size).sum / (1024 * 1024)).toInt).max
 
   /** Add new client connection to MasterLogic
     *
@@ -110,13 +110,14 @@ class MasterLogic(config: Config) {
       workerServiceClient.getSamples(SampleRequest(offset))
   }
 
-  def selectPivots(pivotCandicateListOriginal: List[Pivots]): Pivots = {
-    assert { !pivotCandicateListOriginal.isEmpty }
+  def selectPivots(pivotCandidateListOriginal: List[Pivots]): Pivots = {
+    assert { !pivotCandidateListOriginal.isEmpty }
     assert { !clients.isEmpty }
+    assert { pivotCandidateListOriginal.length == clients.length }
 
-    val pivotCandicateList: List[String] = pivotCandicateListOriginal.flatMap(_.pivots)
+    val pivotCandidateList: List[String] = pivotCandidateListOriginal.flatMap(_.pivots)
 
-    val pivotCandicateListSize: Long = pivotCandicateList.size
+    val pivotCandidateListSize: Long = pivotCandidateList.size
     val totalDataSize: Long = clients.map(_.size).sum
 
     assert { totalDataSize != 0 }
@@ -125,11 +126,11 @@ class MasterLogic(config: Config) {
     val pivotIndices: List[Int] = clientSizes match {
       case _ :: Nil => Nil
       case _ => clientSizes.init.scanLeft(0) { (acc, workerSize) =>
-        acc + (pivotCandicateListSize * (workerSize.toDouble / totalDataSize.toDouble)).toInt
+        acc + (pivotCandidateListSize * (workerSize.toDouble / totalDataSize.toDouble)).toInt
       }.tail
     }
 
-    Pivots(pivotIndices.map(idx => pivotCandicateList(idx)))
+    Pivots(pivotIndices.map(idx => pivotCandidateList(idx)))
   }
 
   def sendPartitionToWorker(client: Layer[Throwable, WorkerServiceClient],

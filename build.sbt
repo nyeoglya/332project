@@ -20,6 +20,7 @@ lazy val commonDependencies = Seq(
   "dev.zio" %% "zio-test" % zioVersion % Test,
   "dev.zio" %% "zio-test-sbt" % zioVersion % Test,
   "dev.zio" %% "zio-test-junit" % zioVersion % Test,
+  "dev.zio" %% "zio-mock" % zioVersion % Test,
   "junit" % "junit" % "4.10" % Test,
   "com.github.sbt" % "junit-interface" % "0.13.3" % Test,
   "org.scalatest" %% "scalatest" % "3.0.8" % Test,
