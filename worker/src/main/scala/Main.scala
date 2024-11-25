@@ -154,9 +154,8 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
    * make newFile's path
    */
   object PathMaker {
-    def sortedSmallFile(filePath : String) : String = {
-      val index = filePath.lastIndexOf('/')
-      config.outputDirectory.toOption.get + "/sorted_" + filePath.substring(index + 1)
+    def sortedSmallFile(fileNum: Int) : String = {
+      config.outputDirectory.toOption.get + "/sorted_" + fileNum.toString
     }
     def sampleFile(filePath : String) : String = {
       val index = filePath.lastIndexOf('/')
@@ -238,11 +237,11 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
    * @param filePath
    * @return sorted file's path
    */
-  def sortSmallFile(filePath : String) : String = {
+  def sortSmallFile(filePath : String, fileNum: Int) : String = {
     assert(Files.size(Paths.get(filePath)) < 50000000)
     val data = readFile(filePath)
     val sortedData = data.sortBy(entity => entity.head)
-    val sortedFilePath = PathMaker.sortedSmallFile(filePath)
+    val sortedFilePath = PathMaker.sortedSmallFile(fileNum)
     writeFile(sortedFilePath, sortedData)
     sortedFilePath
   }
@@ -357,7 +356,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       }
   }
 
-  val sortedSmallFilePaths: List[String] = useParallelism(originalSmallFilePaths)(sortSmallFile)
+  val sortedSmallFilePaths: List[String] = useParallelism(originalSmallFilePaths.zipWithIndex){case (path, index) => sortSmallFile(path, index)}
 
   var shuffledFileCount: Int = 0
   var shuffledFilePaths: List[String] = List.empty[String]
