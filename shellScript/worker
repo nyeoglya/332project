@@ -1,0 +1,5 @@
+#!/bin/bash
+
+worker_path="/home/green/worker.jar"
+
+java -cp $worker_path Main "$*"

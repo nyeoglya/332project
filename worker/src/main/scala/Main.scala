@@ -87,7 +87,7 @@ object Main extends ZIOAppDefault {
 
   def serverLive: ZLayer[WorkerServiceLogic, Throwable, zio_grpc.Server] = for {
       service <- ZLayer.service[WorkerServiceLogic]
-      result <- zio_grpc.ServerLayer.fromServiceList(builder, ServiceList.add(new ServiceImpl(service.get))) 
+      result <- zio_grpc.ServerLayer.fromServiceList(builder, ServiceList.add(new ServiceImpl(service.get)))
   } yield result
 
   class ServiceImpl(service: WorkerServiceLogic) extends WorkerService {
@@ -161,7 +161,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       val index = filePath.lastIndexOf('/')
       config.outputDirectory.toOption.get + "/sampled_" + filePath.substring(index + 1)
     }
-    def partitionedFile(workerNum: Int, filePath: String) ={
+    def partitionedFile(workerNum: Int, filePath: String): String ={
       val index = filePath.lastIndexOf('/')
       config.outputDirectory.toOption.get + "/to" + workerNum.toString + "_" + filePath.substring(index + 1)
     }
