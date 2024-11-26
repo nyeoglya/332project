@@ -19,7 +19,7 @@ for worker_num in $(seq 0 $(($worker_size - 1))); do
 	echo "Generate input files on $worker..."
 
 	for dir_num in $(seq 0 $(($dir_size - 1))); do
-		ssh green@$worker "rm -rf ${name}_input$dir_num mkdir -p ${name}_input$dir_num"
+		ssh green@$worker "rm -rf ${name}_input$dir_num && mkdir -p ${name}_input$dir_num"
 		for file_num in $(seq 0 $(($file_size - 1))); do
 			num=$(expr $worker_num \* $dir_size \* $file_size + $dir_num \* $file_size + $file_num)
 			offset=$(expr $num \* $entity_size)

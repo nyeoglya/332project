@@ -8,17 +8,18 @@ shell_folder="/home/green/332project/shellScript"
 root="/home/green"
 
 echo "Setting master shell on master..."
-mv $shell_folder/master $root
-chmod +x master
+cp $shell_folder/master $root
+chmod +x $root/master
 export PATH=$PATH:$root
 $project_folder/sbt assembly
 
-tar -czvf $project_file $project_folder
+cd $root
+tar -czvf $project_file 332project
 
 for worker in "${workers[@]}"; do
 	echo "Transferring project to $worker..."
-	scp $project_folder green@$worker:$root
-	ssh green@$worker "tar -xzvf $project_file && mv $shell_folder/worker $root && chmod +x worker && export PATH=$PATH:$root && $project_folder/sbt assembly"
+	scp $project_file green@$worker:$root
+	ssh green@$worker "tar -xzvf $project_file && cp $shell_folder/worker $root && chmod +x $root/worker && export PATH=$PATH:$root && $project_folder/sbt assembly"
 
 	echo "Project file transferred on $worker."
 done
