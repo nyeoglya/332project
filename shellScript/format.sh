@@ -4,10 +4,12 @@ workers=("2.2.2.101" "2.2.2.102" "2.2.2.103" "2.2.2.104" "2.2.2.105" "2.2.2.106"
 
 for worker in "${workers[@]}"; do
   echo "Formatting master..."
-  rm -rf files
-  mkdir -p files
+  rm -rf dataset
+  mkdir -p dataset
+  rm -f master
+  rm -f worker
 	echo "Formatting $worker..."
-	ssh green@$worker "rm -rf files && rm -f gensort && rm -f valsort && rm -f project.jar"
+	ssh green@$worker "rm -rf dataset && rm -f gensort && rm -f valsort && rm -rf 332project && rm -f master && rm -f worker && mkdir -p dataset"
 done
 
 

@@ -1,5 +1,5 @@
 #!/bin/bash
 
-worker_path="/home/green/worker.jar"
+path="/home/green/332project"
 
-java -cp $worker_path Main "$*"
+$path/sbt "worker/run $*"
