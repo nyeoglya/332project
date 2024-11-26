@@ -19,7 +19,7 @@ lazy val commonDependencies = Seq(
   "dev.zio" %% "zio-streams" % zioVersion,
   "junit" % "junit" % "4.10" % Test,
   "com.github.sbt" % "junit-interface" % "0.13.3" % Test,
-  "org.scalatest" %% "scalatest" % "3.0.8" % Test,
+  "org.scalatest" %% "scalatest" % "3.2.19" % Test,
   "org.rogach" %% "scallop" % "5.1.0",
   "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf",
   "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion,
