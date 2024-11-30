@@ -163,7 +163,7 @@ class MasterLogic(config: Config) {
     assert { !clients.isEmpty }
     assert { pivotCandidateListOriginal.length == clients.length }
 
-    val pivotCandidateList: List[String] = pivotCandidateListOriginal.flatMap(_.pivots)
+    val pivotCandidateList: List[String] = pivotCandidateListOriginal.flatMap(_.pivots).sorted
 
     val pivotCandidateListSize: Long = pivotCandidateList.size
     val totalDataSize: Long = clients.map(_.size).sum
@@ -171,12 +171,9 @@ class MasterLogic(config: Config) {
     assert { totalDataSize != 0 }
 
     val clientSizes = clients.map(_.size)
-    val pivotIndices: List[Int] = clientSizes match {
-      case _ :: Nil => Nil
-      case _ => clientSizes.init.scanLeft(0) { (acc, workerSize) =>
-        acc + (pivotCandidateListSize * (workerSize.toDouble / totalDataSize.toDouble)).toInt
-      }.tail
-    }
+    val pivotIndices: List[Int] = clientSizes.init.scanLeft(0) { (acc, workerSize) =>
+      acc + (pivotCandidateListSize * (workerSize.toDouble / totalDataSize.toDouble)).toInt
+    }.tail
 
     Pivots(pivotIndices.map(idx => pivotCandidateList(idx)))
   }
