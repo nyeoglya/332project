@@ -20,6 +20,13 @@ import proto.common.{WorkerData, WorkerDataResponse}
 import common.AddressParser
 import proto.common.SampleRequest
 import io.grpc.Status
+import io.grpc.ServerInterceptor
+import io.grpc.{Metadata, ServerCall, ServerCallHandler}
+import io.grpc.ServerCall.Listener
+import io.grpc.ForwardingClientCallListener
+import io.grpc.ForwardingServerCallListener
+import proto.common.SortResponse
+import proto.common.Address
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val workerNum = trailArg[Int](required = true, descr = "Number of workers", default = Some(1))
@@ -40,26 +47,32 @@ object Main extends ZIOAppDefault {
     ) >>> ZLayer.fromFunction {config: Config => new MasterLogic(config)}
   )
 
-  def builder = ServerBuilder
+  def builder(logic: MasterLogic) = ServerBuilder
     .forPort(port)
+    .intercept(new logic.WorkerIpInterceptor)
     .addService(ProtoReflectionService.newInstance())
 
-  def serverLive: ZLayer[MasterLogic, Throwable, zio_grpc.Server] = for {
-    service <- ZLayer.service[MasterLogic]
-    result <- zio_grpc.ServerLayer.fromServiceList(builder, zio_grpc.ServiceList.add(new ServiceImpl(service.get)))
-  } yield result
+  def serverLive: ZLayer[MasterLogic, Throwable, zio_grpc.Server] = {
+    for {
+      service <- ZLayer.service[MasterLogic]
+      result <- zio_grpc.ServerLayer.fromServiceList(
+        builder(service.get), 
+        zio_grpc.ServiceList.add(new ServiceImpl(service.get)))
+    } yield result
+  }
 
   class ServiceImpl(service: MasterLogic) extends MasterService {
     def sendWorkerData(request: WorkerData): IO[StatusException,WorkerDataResponse] = {
       val result = for {
-        addClient <- service.addClient(request.workerAddress, request.fileSize)
-        // TODO: Map addClient
+        addClient <- service.addClient(request.workerPort, request.fileSize)
         result <- ZIO.succeed(WorkerDataResponse())
       } yield result
 
-      result.mapError(e => e match {
-        case e: StatusException => {e} 
-        case _ => new StatusException(Status.INTERNAL)
+      result.mapError(e => {
+        e match {
+          case e: StatusException => {e} 
+          case _ => new StatusException(Status.INTERNAL)
+        }
       })
     }
   }
@@ -68,28 +81,49 @@ object Main extends ZIOAppDefault {
 class MasterLogic(config: Config) {
   case class WorkerClient(val client: Layer[Throwable, WorkerServiceClient], val size: Long)
   
-  var workerIPList: List[String] = List()
+  var workerIpQueue: List[String] = List()
+  var workerIpList: List[Address] = List()
   var clients: List[WorkerClient] = List()
 
   lazy val offset: Int = List(1, (clients.map(_.size).sum / (1024 * 1024)).toInt).max
+
+  // intercepts worker ip from grpc request
+  class WorkerIpInterceptor extends ServerInterceptor {
+    override def interceptCall[ReqT <: Object, RespT <: Object](
+      call: ServerCall[ReqT,RespT], 
+      headers: Metadata, 
+      next: ServerCallHandler[ReqT,RespT]
+    ): Listener[ReqT] = {
+      val clientAddress = call.getAttributes.get(io.grpc.Grpc.TRANSPORT_ATTR_REMOTE_ADDR).toString.tail
+      val clientIp = AddressParser.parse(clientAddress).get._1
+      val methodName = call.getMethodDescriptor().getBareMethodName()
+      if (methodName == "SendWorkerData") {
+        workerIpQueue = workerIpQueue :+ clientIp
+      }
+      next.startCall(call, headers)
+    }
+  }
 
   /** Add new client connection to MasterLogic
     *
     * @param clientAddress address of client
     */
-  def addClient(workerAddress: String, workerSize: Long): IO[Throwable, Any] = {
+  def addClient(workerPort: Int, workerSize: Long): IO[Throwable, Any] = {
+    assert { !workerIpQueue.isEmpty }
     if (clients.size >= config.workerNum.toOption.get) {
-      println(s"Worker attached: ${workerAddress} but rejected")
+      println(s"Worker attached but rejected")
       ZIO.fail(new StatusException(Status.UNAVAILABLE))
     } else {
-      println(s"New worker[${clients.size}] attached: ${workerAddress}, Size: ${workerSize} Bytes")
-      val address = AddressParser.parse(workerAddress).get
+      val workerIp :: others = workerIpQueue
+      workerIpQueue = others
+      println(s"New worker[${clients.size}] attached: ${workerIp}:${workerPort}, Size: ${workerSize} Bytes")
       clients = clients :+ WorkerClient(WorkerServiceClient.live(
         ZManagedChannel(
-          ManagedChannelBuilder.forAddress(address._1, address._2).usePlaintext()
+          ManagedChannelBuilder.forAddress(workerIp, workerPort).usePlaintext()
         )
       ), workerSize)
-      workerIPList = workerIPList :+ workerAddress
+
+      workerIpList = workerIpList :+ Address(workerIp, workerPort)
 
       if (clients.size == config.workerNum.toOption.get) this.run()
       else ZIO.succeed(())
@@ -104,19 +138,25 @@ class MasterLogic(config: Config) {
       pivotCandicateList <- ZIO.foreachPar(clients.map(_.client)) { layer =>
         collectSample.provideLayer(layer)
       }
-
+      _ <- zio.Console.printLine(pivotCandicateList.take(30))
       selectedPivots = selectPivots(pivotCandicateList)
       _ <- zio.Console.printLine(selectedPivots.pivots)
-
-    } yield pivotCandicateList
-
-    // clients.foreach(client => sendPartitionToWorker(client.client, selectedPivots))
+      result <- ZIO.foreachPar(clients.map(_.client).zipWithIndex) { 
+        case (layer, index) => 
+          sendPartition(index, selectedPivots).provideLayer(layer)
+     }
+    } yield result
   }
   
   def collectSample: ZIO[WorkerServiceClient, Throwable, Pivots] =
     ZIO.serviceWithZIO[WorkerServiceClient] { workerServiceClient =>
       workerServiceClient.getSamples(SampleRequest(offset))
   }
+
+  def sendPartition(number: Int, pivots: Pivots): ZIO[WorkerServiceClient, Throwable, SortResponse] =
+    ZIO.serviceWithZIO[WorkerServiceClient] { workerServiceClient => 
+      workerServiceClient.startShuffle(ShuffleRequest(pivots = Some(pivots), workerAddresses = workerIpList, workerNumber = number))
+   }
 
   def selectPivots(pivotCandidateListOriginal: List[Pivots]): Pivots = {
     assert { !pivotCandidateListOriginal.isEmpty }
@@ -140,13 +180,4 @@ class MasterLogic(config: Config) {
 
     Pivots(pivotIndices.map(idx => pivotCandidateList(idx)))
   }
-
-  def sendPartitionToWorker(
-    client: Layer[Throwable, WorkerServiceClient],
-    pivots: ZIO[Any, Throwable, Pivots]): ZIO[Any, Throwable, Unit] = for {
-      pivotsData <- pivots
-      workerServiceClient <- ZIO.scoped(client.build).map(_.get) // ZEnvironment에서 WorkerServiceClient 추출
-      shuffleRequest = ShuffleRequest(pivots = Some(pivotsData), workerAddresses = workerIPList)
-      _ <- workerServiceClient.startShuffle(shuffleRequest).mapError(e => new RuntimeException(s"Failed to send ShuffleRequest: ${e.getMessage}"))
-    } yield ()
 }

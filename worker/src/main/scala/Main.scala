@@ -78,7 +78,7 @@ object Main extends ZIOAppDefault {
 
   val sendDataToMaster: ZIO[MasterServiceClient with WorkerServiceLogic, Throwable, WorkerDataResponse] = for {
     worker <- ZIO.service[WorkerServiceLogic]
-    result <- MasterServiceClient.sendWorkerData(WorkerData(worker.getFileSize, s"127.0.0.1:${port}"))
+    result <- MasterServiceClient.sendWorkerData(WorkerData(worker.getFileSize, port))
   } yield result
 
   def builder = ServerBuilder
@@ -101,8 +101,24 @@ object Main extends ZIOAppDefault {
       result.mapError(e => new StatusException(Status.INTERNAL))
     }
 
-    def startShuffle(request: ShuffleRequest): IO[StatusException,SortResponse] = ???
-    def sendData(request: DataRequest): IO[StatusException,DataResponse] = ???
+    def startShuffle(request: ShuffleRequest): IO[StatusException,SortResponse] = {
+      println(s"StartShuffle with index ${request.workerNumber} requested")
+      println("Worker addresses:")
+      request.workerAddresses.foreach(println)
+      val pivots = request.pivots.get
+      println(s"Partition: ${pivots.pivots}")
+
+      val files = service.getToWorkerNFilePaths(pivots)
+      // TODO: sendData to Each worker
+
+      ZIO.succeed(SortResponse())
+    }
+
+    def sendData(request: DataRequest): IO[StatusException,DataResponse] = {
+      println(s"Get data fregment: ${request.hasNext}")
+      service.writeNetworkFile(request.payload.toList)
+      ZIO.succeed(DataResponse())
+    } 
   }
 }
 

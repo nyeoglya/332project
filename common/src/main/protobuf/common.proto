@@ -14,7 +14,7 @@ service WorkerService {
 
 message WorkerData {
 	int64 fileSize = 1;
-	string workerAddress = 2;
+	int32 workerPort = 2;
 }
 message WorkerDataResponse {}
 
@@ -31,9 +31,15 @@ message Pivots {
 	repeated string pivots = 1;
 }
 
+message Address {
+	string ip = 1;
+	int32 port = 2;
+}
+
 message ShuffleRequest {
 	Pivots pivots = 1;
-	repeated string workerAddresses = 2;
+	repeated Address workerAddresses = 2;
+	int32 workerNumber = 3;
 }
 
 message SampleResponse {
@@ -43,7 +49,8 @@ message SampleResponse {
 message SortResponse {}
 
 message DataRequest {
-	bool has_next = 1;
-	repeated Entity payload = 2;
+	int32 workerNumber = 1;
+	bool has_next = 2;
+	repeated Entity payload = 3;
 }
 message DataResponse {}
