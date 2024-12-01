@@ -13,6 +13,7 @@ Compile / PB.targets := Seq(
 
 lazy val commonDependencies = Seq(
   "io.grpc" % "grpc-netty" % grpcVersion,
+  "io.grpc" % "grpc-netty-shaded" % grpcVersion,
   "io.grpc" % "grpc-protobuf" % grpcVersion,
   "io.grpc" % "grpc-stub" % grpcVersion,
   "dev.zio" %% "zio" % zioVersion,
@@ -59,11 +60,15 @@ lazy val worker = (project in file("worker"))
   .settings(
     name := "worker",
     libraryDependencies ++= commonDependencies ++ workerDependencies,
+    libraryDependencies ++= Seq(
+      "io.grpc" % "grpc-netty" % grpcVersion
+    ),
     assembly / mainClass := Some("worker.Main"),
     assembly / assemblyJarName := s"${name.value}.jar",
     assembly / test := {},
     assembly / assemblyMergeStrategy := {
-      case PathList("META-INF", _*) => MergeStrategy.discard
+      case PathList("META-INF", "MANIFEST.MF") => MergeStrategy.discard
+      case PathList("reference.conf") => MergeStrategy.concat
       case _ => MergeStrategy.first
     },
     Compile / PB.targets := Seq(
@@ -77,11 +82,15 @@ lazy val master = (project in file("master"))
   .settings(
     name := "master",
     libraryDependencies ++= commonDependencies ++ masterDependencies,
+    libraryDependencies ++= Seq(
+      "io.grpc" % "grpc-netty" % grpcVersion
+    ),
     assembly / mainClass := Some("master.Main"),
     assembly / assemblyJarName := s"${name.value}.jar",
     assembly / test := {},
     assembly / assemblyMergeStrategy := {
-      case PathList("META-INF", _*) => MergeStrategy.discard
+      case PathList("META-INF", "MANIFEST.MF") => MergeStrategy.discard
+      case PathList("reference.conf") => MergeStrategy.concat
       case _ => MergeStrategy.first
     },
     Compile / PB.targets := Seq(

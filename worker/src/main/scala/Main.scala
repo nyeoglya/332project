@@ -35,20 +35,22 @@ import proto.common.ZioCommon.WorkerServiceClient
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val masterAddress = trailArg[String](required = true, descr = "Mater address (e.g. 192.168.0.1:8000)", default = Some("127.0.0.1"))
-  val port = opt[Int](name = "P", descr = "Worker server port", default = Some(8080))
+  val port = opt[Int](name = "P", descr = "Worker server port", default = Some(50051))
   val inputDirectories = opt[List[String]](name = "I", descr = "Input directories", default = Some(List()))
   val outputDirectory = opt[String](name = "O", descr = "Output directory", default = Some(""))
   verify()
 }
 
 object Main extends ZIOAppDefault {
-  var port = 8080
+  var port = 50051
 
   def run: ZIO[Environment with ZIOAppArgs with Scope,Any,Any] = { 
     (for {
       result <- serverLive.launch.exitCode.fork
       _ <- zio.Console.printLine(s"Worker is running on port ${port}. Press Ctrl-C to stop.")
-      _ <- sendDataToMaster
+      _ <- sendDataToMaster.mapError(e => {
+        println("Error while send data to master")
+      })
       result <- result.join
     } yield result)
       .provideSomeLayer[ZIOAppArgs](
@@ -103,6 +105,11 @@ object Main extends ZIOAppDefault {
       } yield result
 
       result.mapError(e => new StatusException(Status.INTERNAL))
+    }.catchAllCause { cause =>
+      ZIO.fail {
+        println(s"Get samples error cause : $cause")
+        new StatusException(Status.INTERNAL)
+      }
     }
 
     def startShuffle(request: ShuffleRequest): IO[StatusException,SortResponse] = {
@@ -119,6 +126,7 @@ object Main extends ZIOAppDefault {
       val result = for {
         result <- ZIO.foreach(files.zipWithIndex)({case (fileList, index) => {
           if (index != request.workerNumber) {
+            println(s"Connect to: worker[${index}]")
             val layer = WorkerServiceClient.live(
                 zio_grpc.ZManagedChannel(
                   ManagedChannelBuilder.forAddress(
@@ -127,25 +135,46 @@ object Main extends ZIOAppDefault {
                   ).usePlaintext()
                 )
             )
+            layer.mapError(e => {
+              println(s"Error while connecting worker[${index}]")
+              println(e)
+            })
+            println(s"Connected to : worker[${index}]")
             for {
-              result <- ZIO.foreach(fileList.zipWithIndex)({case (filePath, index) => {
-                val file = service.readFile(filePath)
-                for {
-                  result <- sendDataToWorker(
-                    request.workerNumber,
-                    index != (fileList.size - 1),
-                    file
-                  ).provideLayer(layer)
-                } yield result
-              }})
+              result <- ZIO.foreach(fileList.zipWithIndex)(
+              { case (filePath, index) => 
+                {
+                  val file = service.readFile(filePath)
+                  println(s"Send File[${index}]")
+                  for {
+                    result <- sendDataToWorker(
+                      request.workerNumber,
+                      index != (fileList.size - 1),
+                      file
+                    ).provideLayer(layer).catchAllCause(cause => 
+                     ZIO.fail{
+                      println(s"Error while send file [${index}]: $cause")
+                      new RuntimeException("SENDFILE")
+                    })
+                  } yield result
+                }
+              }).catchAllCause( cause => 
+                ZIO.fail {
+                  println(s"Send files error cause: $cause")
+                  new RuntimeException("SENDFILES")
+                }
+              )
             } yield result
-          }
-          else ZIO.succeed(())
+          } else ZIO.succeed(())
         }})
       } yield result
-
-      result.map(value => new SortResponse()).mapError(e => new StatusException(Status.INTERNAL))
-    }
+      result.catchAllCause(cause => 
+        ZIO.succeed {
+          println(s"Shuffle Request failed: $cause")
+          SortResponse()
+        }
+        ).map(value => SortResponse())
+    } 
 
     def sendData(request: DataRequest): IO[StatusException,DataResponse] = {
       println(s"Get data fregment from worker[${request.workerNumber}]")
@@ -160,7 +189,12 @@ object Main extends ZIOAppDefault {
         println(s"Complete Sorting")
       }
       ZIO.succeed(DataResponse())
-    } 
+    }.catchAllCause { cause => 
+      ZIO.succeed {
+        println(s"Send data Error cause: $cause")
+        DataResponse()
+      }
+    }
   }
 }
 
@@ -247,14 +281,14 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
    * @return
    */
   def useParallelism[A, B](target: List[A])(func: A => B): List[B] = {
-    val availableThreads = java.lang.Runtime.getRuntime.availableProcessors()
-    val parallel: ZIO[Any, Throwable, List[B]] = {
-      if(target.length <= availableThreads * 2)
-        ZIO.foreachPar(target)(item => ZIO.succeed(func(item)))
-      else
-        ZIO.foreach(target.grouped(availableThreads).toList)(chunk => ZIO.foreachPar(chunk){item => ZIO.succeed(func(item))}).map(_.flatten)
-    }
     if(parallelMode) {
+      val availableThreads = java.lang.Runtime.getRuntime.availableProcessors()
+      val parallel: ZIO[Any, Throwable, List[B]] = {
+        if(target.length <= availableThreads * 2)
+          ZIO.foreachPar(target)(item => ZIO.succeed(func(item)))
+        else
+          ZIO.foreach(target.grouped(availableThreads).toList)(chunk => ZIO.foreachPar(chunk){item => ZIO.succeed(func(item))}).map(_.flatten)
+      }
       Unsafe unsafe {implicit unsafe =>
         Runtime.default.unsafe.run(parallel).getOrThrow()
       }
@@ -290,9 +324,9 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
 
   def writeNetworkFile(data: List[Entity]): Unit = {
     val filePath = PathMaker.shuffledFile(shuffledFileCount)
+    shuffledFileCount = shuffledFileCount + 1
     writeFile(filePath, data)
     shuffledFilePaths = filePath::shuffledFilePaths
-    shuffledFileCount = shuffledFileCount + 1
   }
 
   /** sort given file in memory and save them on new file
@@ -354,32 +388,33 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     val reader = new BufferedReader(new FileReader(filePath))
 
     @tailrec
-    def readPartitionWrite(acc: List[String], index: Int, writer: BufferedWriter, entity: Entity, count: Int): List[String] = {
+    def readPartitionWrite(acc: List[String], index: Int, writer: BufferedWriter): List[String] = {
+      val entity = readEntity(reader)
       if(entity == Entity("","")) {
         writer.close()
-        val oldFilePath =
-          if(count != 0) PathMaker.partitionedFile(index, filePath)
-          else ""
+        val oldFilePath = PathMaker.partitionedFile(index, filePath)
         acc ++ List(oldFilePath)
       }
       else if(index >= pivots.length || entity.head < pivots(index)) {
         writer.write(entity.head)
         writer.write(entity.body)
-        readPartitionWrite(acc, index, writer, readEntity(reader), count + 1)
+        readPartitionWrite(acc, index, writer)
       }
       else {
         writer.close()
-        val oldFilePath = if(count != 0) PathMaker.partitionedFile(index, filePath) else ""
+        val oldFilePath = PathMaker.partitionedFile(index, filePath)
         val newFilePath = PathMaker.partitionedFile(index + 1, filePath)
         val newAcc = acc ++ List(oldFilePath)
         val newWriter = new BufferedWriter(new FileWriter(newFilePath))
-        readPartitionWrite(newAcc, index + 1, newWriter, entity, 0)
+        newWriter.write(entity.head)
+        newWriter.write(entity.body)
+        readPartitionWrite(newAcc, index + 1, newWriter)
       }
     }
     val writer = new BufferedWriter(new FileWriter(PathMaker.partitionedFile(0, filePath)))
-    val result = readPartitionWrite(List.empty[String], 0, writer, readEntity(reader), 0)
+    val result = readPartitionWrite(List.empty[String], 0, writer)
     reader.close()
-    result.padTo(pivots.length + 1, "")
+    result
   }
 
   def mergeTwoFile(num: Int, path1: String, path2: String): String = {
@@ -439,7 +474,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     val toWorkerFilePaths = for {
       n <- (0 to partition.pivots.length).toList
       toN = partitionFilePaths.map(_(n))
-    } yield toN.filter(path => path != "")
+    } yield toN
     //sortedSmallFilePaths.foreach(path => Files.delete(Paths.get(path)))
     shuffledFilePaths = toWorkerFilePaths(workerNum)
     toNFilePaths = toWorkerFilePaths.patch(workerNum, Nil, 1).flatten
@@ -447,7 +482,6 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   }
 
   def mergeWrite(workerNum: Int) : String = {
-    //toNFilePaths.foreach(path => Files.delete(Paths.get(path)))
     @tailrec
     def mergeLevel(filePaths: List[String]): String = {
       if(filePaths.length == 1) filePaths.head
@@ -464,6 +498,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     val mergedFilePath = mergeLevel(shuffledFilePaths)
     val resultFilePath = PathMaker.resultFile(workerNum)
     Files.move(Paths.get(mergedFilePath), Paths.get(resultFilePath), StandardCopyOption.REPLACE_EXISTING)
+    //toNFilePaths.foreach(path => Files.delete(Paths.get(path)))
     resultFilePath
   }
 }
