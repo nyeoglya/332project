@@ -242,7 +242,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   /**
    * for test & comparing
    */
-  val parallelMode = false
+  val parallelMode = true
 
   /**
    * make newFile's path
@@ -335,7 +335,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
    * @return sorted file's path
    */
   private def sortSmallFile(filePath : String, fileNum: Int) : String = {
-    assert(Files.size(Paths.get(filePath)) < 50000000)
+    //assert(Files.size(Paths.get(filePath)) < 50000000)
     val data = readFile(filePath)
     val sortedData = data.sortBy(entity => entity.head)
     val sortedFilePath = PathMaker.sortedSmallFile(fileNum)
@@ -439,8 +439,8 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     writer.close()
     reader1.close()
     reader2.close()
-    Files.delete(Paths.get(path1))
-    Files.delete(Paths.get(path2))
+    //Files.delete(Paths.get(path1))
+    //Files.delete(Paths.get(path2))
     filePath
   }
 
@@ -465,7 +465,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   def getSampleList(offset: Int): List[String] = {
     val sampleFilePaths = useParallelism(sortedSmallFilePaths)(produceSampleFile(_, offset))
     val result = sampleFilePaths.flatMap(path => readFile(path)).map(entity => entity.head)
-    sampleFilePaths.foreach(path => Files.delete(Paths.get(path)))
+    //sampleFilePaths.foreach(path => Files.delete(Paths.get(path)))
     result
   }
   def getToWorkerNFilePaths(workerNum: Int, partition: Pivots): List[List[String]] = {

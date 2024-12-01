@@ -293,6 +293,18 @@ class WithoutNetworkTest extends FunSuite {
       automaticTest(10, 5, 10, "small10")
     }
 
+    test("32MB x 2, 10 worker ") {
+      // before parallelization
+      // test time: 40812.3332 ms
+      // worker: 22491.0053 ms | offset: 1.8241 ms | sample: 1508.7812 ms
+      // pivot: 0.3917 ms | from: 1697.7231 ms | merge: 15112.6078 ms
+
+      // test time: 22083.3851 ms
+      // worker: 4792.2191 ms | offset: 2.1347 ms | sample: 1496.6731 ms
+      // pivot: 0.4116 ms | from: 1732.62 ms | merge: 14059.3266 ms
+      automaticTest(10, 2, 320000, "small")
+    }
+
     test("32MB x 2, 2 worker ") {
       // before parallelization
       // test time: 2672.6841 ms
