@@ -388,33 +388,32 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     val reader = new BufferedReader(new FileReader(filePath))
 
     @tailrec
-    def readPartitionWrite(acc: List[String], index: Int, writer: BufferedWriter): List[String] = {
-      val entity = readEntity(reader)
+    def readPartitionWrite(acc: List[String], index: Int, writer: BufferedWriter, entity: Entity, count: Int): List[String] = {
       if(entity == Entity("","")) {
         writer.close()
-        val oldFilePath = PathMaker.partitionedFile(index, filePath)
+        val oldFilePath =
+          if(count != 0) PathMaker.partitionedFile(index, filePath) else ""
         acc ++ List(oldFilePath)
       }
       else if(index >= pivots.length || entity.head < pivots(index)) {
         writer.write(entity.head)
         writer.write(entity.body)
-        readPartitionWrite(acc, index, writer)
+        readPartitionWrite(acc, index, writer, readEntity(reader), count + 1)
       }
       else {
         writer.close()
-        val oldFilePath = PathMaker.partitionedFile(index, filePath)
+        val oldFilePath =
+          if(count != 0) PathMaker.partitionedFile(index, filePath) else ""
         val newFilePath = PathMaker.partitionedFile(index + 1, filePath)
         val newAcc = acc ++ List(oldFilePath)
         val newWriter = new BufferedWriter(new FileWriter(newFilePath))
-        newWriter.write(entity.head)
-        newWriter.write(entity.body)
-        readPartitionWrite(newAcc, index + 1, newWriter)
+        readPartitionWrite(newAcc, index + 1, newWriter, entity, 0)
       }
     }
     val writer = new BufferedWriter(new FileWriter(PathMaker.partitionedFile(0, filePath)))
-    val result = readPartitionWrite(List.empty[String], 0, writer)
+    val result = readPartitionWrite(List.empty[String], 0, writer, readEntity(reader), 0)
     reader.close()
-    result
+    result.padTo(pivots.length + 1, "")
   }
 
   def mergeTwoFile(num: Int, path1: String, path2: String): String = {
@@ -474,7 +473,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     val toWorkerFilePaths = for {
       n <- (0 to partition.pivots.length).toList
       toN = partitionFilePaths.map(_(n))
-    } yield toN
+    } yield toN.filter(_ != "")
     //sortedSmallFilePaths.foreach(path => Files.delete(Paths.get(path)))
     shuffledFilePaths = toWorkerFilePaths(workerNum)
     toNFilePaths = toWorkerFilePaths.patch(workerNum, Nil, 1).flatten
