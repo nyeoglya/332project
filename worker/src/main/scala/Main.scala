@@ -6,7 +6,7 @@ import zio.stream._
 import scalapb.zio_grpc.{ServerMain, ServiceList}
 
 import java.io.{BufferedReader, BufferedWriter, File, FileReader, FileWriter, PrintWriter}
-import java.nio.file.{Files, Paths}
+import java.nio.file.{Files, Paths, StandardCopyOption}
 import scala.io.Source
 import io.grpc.StatusException
 import io.grpc.ServerBuilder
@@ -15,7 +15,6 @@ import proto.common.{DataResponse, Entity, Pivots, SampleRequest, SortResponse}
 import proto.common.ZioCommon.WorkerService
 import scalapb.zio_grpc
 
-import java.nio.file.Files
 import scala.collection.mutable.PriorityQueue
 import scala.language.postfixOps
 import proto.common.ShuffleRequest
@@ -115,7 +114,7 @@ object Main extends ZIOAppDefault {
       val pivots = request.pivots.get
       println(s"Partition: ${pivots.pivots}")
 
-      val files = service.getToWorkerNFilePaths(pivots)
+      val files = service.getToWorkerNFilePaths(request.workerNumber, pivots)
 
       val result = for {
         result <- ZIO.foreach(files.zipWithIndex)({case (fileList, index) => {
@@ -170,8 +169,6 @@ trait WorkerServiceLogic {
   var receivedWorker = 0
   var totalWorker = 0
 
-  def inputEntities: Stream[Throwable, Entity]
-
   /** Get whole file size of worker
     *
     * @return Int of bytes of file size
@@ -190,7 +187,7 @@ trait WorkerServiceLogic {
    * @param partition
    * @return
    */
-  def getToWorkerNFilePaths(partition: Pivots): List[List[String]]
+  def getToWorkerNFilePaths(workerNum: Int, partition: Pivots): List[List[String]]
 
   /** Merge given files using bottom up merge sort
    *
@@ -216,7 +213,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   /**
    * make newFile's path
    */
-  object PathMaker {
+  private object PathMaker {
     def sortedSmallFile(fileNum: Int) : String = {
       config.outputDirectory.toOption.get + "/sorted_" + fileNum.toString
     }
@@ -229,11 +226,14 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       config.outputDirectory.toOption.get + "/to" + workerNum.toString + "_" + filePath.substring(index + 1)
     }
     def shuffledFile(num: Int): String = {
-      config.outputDirectory.toOption.get + "/shuffled_" + num.toString + ".txt"
+      config.outputDirectory.toOption.get + "/shuffled_" + num.toString + (if(txtMode) ".txt" else "")
     }
     def mergedFile(num: Int, filePath: String): String = {
       val index = filePath.lastIndexOf('/')
       config.outputDirectory.toOption.get + "/m" + num.toString + "_" + filePath.substring(index + 1)
+    }
+    def resultFile(num: Int): String = {
+      config.outputDirectory.toOption.get + "/merged" + num.toString + (if(txtMode) ".txt" else "")
     }
   }
 
@@ -269,7 +269,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
    * @param reader
    * @return read entity (success) | Entity("","") (fail)
    */
-  def readEntity(reader: BufferedReader): Entity = {
+  private def readEntity(reader: BufferedReader): Entity = {
     val line = reader.readLine()
     if(line == null) Entity("","")
     else Entity(line.splitAt(10)._1, line.splitAt(10)._2 + java.lang.System.lineSeparator())
@@ -282,7 +282,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     entities
   }
 
-  def writeFile(filePath : String, data : List[Entity]) : Unit = {
+  private def writeFile(filePath : String, data : List[Entity]) : Unit = {
     val writer = new BufferedWriter(new FileWriter(filePath))
     data.foreach(entity => {writer.write(entity.head); writer.write(entity.body)})
     writer.close()
@@ -300,7 +300,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
    * @param filePath
    * @return sorted file's path
    */
-  def sortSmallFile(filePath : String, fileNum: Int) : String = {
+  private def sortSmallFile(filePath : String, fileNum: Int) : String = {
     assert(Files.size(Paths.get(filePath)) < 50000000)
     val data = readFile(filePath)
     val sortedData = data.sortBy(entity => entity.head)
@@ -411,7 +411,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     filePath
   }
 
-  val originalSmallFilePaths : List[String] = {
+  private val originalSmallFilePaths : List[String] = {
     config.inputDirectories.toOption.getOrElse(List(""))
       .flatMap{ directoryPath =>
         val directory = new File(directoryPath)
@@ -419,31 +419,36 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       }
   }
 
+  private val txtMode = originalSmallFilePaths.head.endsWith(".txt")
+
   val sortedSmallFilePaths: List[String] = useParallelism(originalSmallFilePaths.zipWithIndex){case (path, index) => sortSmallFile(path, index)}
 
-  var shuffledFileCount: Int = 0
-  var shuffledFilePaths: List[String] = List.empty[String]
+  private var toNFilePaths: List[String] = List.empty[String]
+  private var shuffledFileCount: Int = 0
+  private var shuffledFilePaths: List[String] = List.empty[String]
 
   // TODO: Read files from storage
-
-  def inputEntities: Stream[Throwable, Entity] =
-    ZStream.fromIterable(originalSmallFilePaths).flatMap(path => ZStream.fromIterable(readFile(path)))
-
   def getFileSize(): Long = originalSmallFilePaths.map(path => Files.size(Paths.get(path))).sum.toLong
   def getSampleList(offset: Int): List[String] = {
     val sampleFilePaths = useParallelism(sortedSmallFilePaths)(produceSampleFile(_, offset))
-    sampleFilePaths.flatMap(path => readFile(path)).map(entity => entity.head)
+    val result = sampleFilePaths.flatMap(path => readFile(path)).map(entity => entity.head)
+    sampleFilePaths.foreach(path => Files.delete(Paths.get(path)))
+    result
   }
-  def getToWorkerNFilePaths(partition: Pivots): List[List[String]] = {
+  def getToWorkerNFilePaths(workerNum: Int, partition: Pivots): List[List[String]] = {
     val partitionFilePaths = useParallelism(sortedSmallFilePaths)(makePartitionedFiles(_, partition.pivots.toList))
     val toWorkerFilePaths = for {
       n <- (0 to partition.pivots.length).toList
       toN = partitionFilePaths.map(_(n))
     } yield toN
+    sortedSmallFilePaths.foreach(path => Files.delete(Paths.get(path)))
+    shuffledFilePaths = toWorkerFilePaths(workerNum)
+    toNFilePaths = toWorkerFilePaths.patch(workerNum, Nil, 1).flatten
     toWorkerFilePaths
   }
 
   def mergeWrite(workerNum: Int) : String = {
+    toNFilePaths.foreach(path => Files.delete(Paths.get(path)))
     @tailrec
     def mergeLevel(filePaths: List[String]): String = {
       if(filePaths.length == 1) filePaths.head
@@ -457,6 +462,12 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
         mergeLevel(nextFilePaths)
       }
     }
-    mergeLevel(shuffledFilePaths)
+    val mergedFilePath = mergeLevel(shuffledFilePaths)
+    val resultFilePath = PathMaker.resultFile(workerNum)
+    Files.move(Paths.get(mergedFilePath), Paths.get(resultFilePath), StandardCopyOption.REPLACE_EXISTING)
+    resultFilePath
   }
 }
+
+
+
