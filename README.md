@@ -24,7 +24,7 @@
 
 **Week 6 (Progress Slides Deadline): Organizing Content, Preparing for Intermediate Presentation** [Presentation Slides](https://github.com/nyeoglya/332project/blob/main/presentation/) / [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week6_report.html)
 
-**Week 7: Project Improvement and Maintenance**
+**Week 7: Project Improvement and Maintenance** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week7_report.html)
 
 **Week 8 (Project Deadline): Preparing for Final Presentation**
 
