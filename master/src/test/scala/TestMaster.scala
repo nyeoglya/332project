@@ -19,7 +19,8 @@ class MasterSuite extends FunSuite {
     for {
       i <- 0 until workerCount
     } {
-      masterLogic.addClient(s"127.0.0.${i+1}:7777", workerKeyList(i).length.toLong)
+      masterLogic.workerIpQueue = masterLogic.workerIpQueue :+ "127.0.0.1"
+      masterLogic.addClient(7777, workerKeyList(i).length.toLong)
     }
     
     masterLogic
