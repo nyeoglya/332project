@@ -11,7 +11,6 @@ echo "Setting master shell on master..."
 cp $shell_folder/master $root
 chmod +x $root/master
 export PATH=$PATH:$root
-$project_folder/sbt assembly
 
 cd $root
 tar -czvf $project_file 332project
