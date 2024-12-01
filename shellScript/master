@@ -1,5 +1,7 @@
 #!/bin/bash
 
+worker_num="$1"
+
 path="/home/green/332project"
 
-$path/sbt "master/run $*"
+$path/jdk/bin/java -jar master.jar $worker_num
