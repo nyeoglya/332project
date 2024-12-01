@@ -183,7 +183,7 @@ class WithoutNetworkTest extends FunSuite {
     checkValidity(workerNum, fileNum, fileSize, testName, resultFilePaths)
   }
 
-  if(!os.contains("win")) {
+  if(os.contains("win")) {
     createFiles(2, 2, 1000, "4000")
     val workerArg = createArgs(2, "4000")
     val worker1Arg = workerArg(0)
