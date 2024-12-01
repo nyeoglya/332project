@@ -31,6 +31,7 @@ import java.awt.image.DataBufferDouble
 import java.nio.charset.StandardCharsets
 import scala.annotation.tailrec
 import proto.common.DataRequest
+import proto.common.ZioCommon.WorkerServiceClient
 
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
@@ -81,6 +82,10 @@ object Main extends ZIOAppDefault {
     result <- MasterServiceClient.sendWorkerData(WorkerData(worker.getFileSize, port))
   } yield result
 
+  def sendDataToWorker(index: Int, has_next: Boolean, data: List[Entity]): ZIO[WorkerServiceClient, Throwable, DataResponse] = for {
+    result <- WorkerServiceClient.sendData(DataRequest(index, has_next, data))
+  } yield result
+
   def builder = ServerBuilder
     .forPort(port)
     .addService(ProtoReflectionService.newInstance())
@@ -103,26 +108,68 @@ object Main extends ZIOAppDefault {
 
     def startShuffle(request: ShuffleRequest): IO[StatusException,SortResponse] = {
       println(s"StartShuffle with index ${request.workerNumber} requested")
+      service.workerNumber = request.workerNumber
       println("Worker addresses:")
       request.workerAddresses.foreach(println)
+      service.totalWorker = request.workerAddresses.size
       val pivots = request.pivots.get
       println(s"Partition: ${pivots.pivots}")
 
       val files = service.getToWorkerNFilePaths(pivots)
-      // TODO: sendData to Each worker
 
-      ZIO.succeed(SortResponse())
+      val result = for {
+        result <- ZIO.foreach(files.zipWithIndex)({case (fileList, index) => {
+          if (index != request.workerNumber) {
+            val layer = WorkerServiceClient.live(
+                zio_grpc.ZManagedChannel(
+                  ManagedChannelBuilder.forAddress(
+                    request.workerAddresses(index).ip, 
+                    request.workerAddresses(index).port
+                  ).usePlaintext()
+                )
+            )
+            for {
+              result <- ZIO.foreach(fileList.zipWithIndex)({case (filePath, index) => {
+                val file = service.readFile(filePath)
+                for {
+                  result <- sendDataToWorker(
+                    request.workerNumber,
+                    index != (fileList.size - 1),
+                    file
+                  ).provideLayer(layer)
+                } yield result
+              }})
+            } yield result
+          }
+          else ZIO.succeed(())
+        }})
+      } yield result
+
+      result.map(value => new SortResponse()).mapError(e => new StatusException(Status.INTERNAL))
     }
 
     def sendData(request: DataRequest): IO[StatusException,DataResponse] = {
-      println(s"Get data fregment: ${request.hasNext}")
+      println(s"Get data fregment from worker[${request.workerNumber}]")
       service.writeNetworkFile(request.payload.toList)
+      if (!request.hasNext) {
+        println(s"All data received from worker[${request.workerNumber}]")
+        service.receivedWorker += 1
+      }
+      if (service.receivedWorker == service.totalWorker - 1) {
+        println(s"Start merging files")
+        service.mergeWrite(service.workerNumber)
+        println(s"Complete Sorting")
+      }
       ZIO.succeed(DataResponse())
     } 
   }
 }
 
 trait WorkerServiceLogic {
+  var workerNumber = 0
+  var receivedWorker = 0
+  var totalWorker = 0
+
   def inputEntities: Stream[Throwable, Entity]
 
   /** Get whole file size of worker

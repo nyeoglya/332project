@@ -27,6 +27,7 @@ import io.grpc.ForwardingClientCallListener
 import io.grpc.ForwardingServerCallListener
 import proto.common.SortResponse
 import proto.common.Address
+import java.lang
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val workerNum = trailArg[Int](required = true, descr = "Number of workers", default = Some(1))
@@ -138,13 +139,14 @@ class MasterLogic(config: Config) {
       pivotCandicateList <- ZIO.foreachPar(clients.map(_.client)) { layer =>
         collectSample.provideLayer(layer)
       }
-      _ <- zio.Console.printLine(pivotCandicateList.take(30))
       selectedPivots = selectPivots(pivotCandicateList)
       _ <- zio.Console.printLine(selectedPivots.pivots)
+      _ <- zio.Console.printLine("Requests shuffle to each workers")
       result <- ZIO.foreachPar(clients.map(_.client).zipWithIndex) { 
         case (layer, index) => 
           sendPartition(index, selectedPivots).provideLayer(layer)
-     }
+      }
+      _ <- zio.Console.printLine("Shffule request complete.")
     } yield result
   }
   
