@@ -2,4 +2,4 @@
 
 path="/home/green/332project"
 
-$path/sbt "worker/run $*"
+$path/jdk/bin/java -jar worker.jar $*
