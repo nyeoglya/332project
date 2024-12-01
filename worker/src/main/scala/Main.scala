@@ -259,6 +259,10 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       val index = filePath.lastIndexOf('/')
       config.outputDirectory.toOption.get + "/to" + workerNum.toString + "_" + filePath.substring(index + 1)
     }
+    def _3MBFile(num: Int, filePath: String): String = {
+      val index = filePath.lastIndexOf('/')
+      config.outputDirectory.toOption.get + "/s" + num.toString + "_" + filePath.substring(index + 1)
+    }
     def shuffledFile(num: Int): String = {
       config.outputDirectory.toOption.get + "/shuffled_" + num.toString + (if(txtMode) ".txt" else "")
     }
@@ -444,10 +448,13 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     filePath
   }
 
+  private var totalFileSize: Long = 0
+
   private val originalSmallFilePaths : List[String] = {
     config.inputDirectories.toOption.getOrElse(List(""))
       .flatMap{ directoryPath =>
         val directory = new File(directoryPath)
+        totalFileSize += directory.listFiles.filter(_.isFile).map(_.length).sum
         directory.listFiles.map(_.getPath.replace("\\", "/")).toList
       }
   }
@@ -461,7 +468,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   private var shuffledFilePaths: List[String] = List.empty[String]
 
   // TODO: Read files from storage
-  def getFileSize(): Long = originalSmallFilePaths.map(path => Files.size(Paths.get(path))).sum.toLong
+  def getFileSize(): Long = totalFileSize
   def getSampleList(offset: Int): List[String] = {
     val sampleFilePaths = useParallelism(sortedSmallFilePaths)(produceSampleFile(_, offset))
     val result = sampleFilePaths.flatMap(path => readFile(path)).map(entity => entity.head)
@@ -469,11 +476,41 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     result
   }
   def getToWorkerNFilePaths(workerNum: Int, partition: Pivots): List[List[String]] = {
+    def splitInto3MBFile(filePath: String): List[String] = {
+      val fileSize = new File(filePath).length
+      if(fileSize >= 4000000) {
+        var count = 0
+        val reader = new BufferedReader(new FileReader(filePath))
+        var old_path = PathMaker._3MBFile(0, filePath)
+        var writer = new BufferedWriter(new FileWriter(old_path))
+        var resultFiles = List.empty[String]
+        var entity = Entity("","")
+        while({entity = readEntity(reader); entity != Entity("","")}) {
+          writer.write(entity.head)
+          writer.write(entity.body)
+          count += 1
+          if(count >= 30000) {
+            count = 0
+            resultFiles = old_path::resultFiles
+            writer.close()
+            old_path = PathMaker._3MBFile(resultFiles.length, filePath)
+            writer = new BufferedWriter(new FileWriter(old_path))
+          }
+        }
+        reader.close()
+        if(count > 0) {
+          resultFiles = old_path::resultFiles
+        } else ()
+        writer.close()
+        resultFiles
+      }
+      else List(filePath)
+    }
     val partitionFilePaths = useParallelism(sortedSmallFilePaths)(makePartitionedFiles(_, partition.pivots.toList))
     val toWorkerFilePaths = for {
       n <- (0 to partition.pivots.length).toList
       toN = partitionFilePaths.map(_(n))
-    } yield toN.filter(_ != "")
+    } yield toN.filter(_ != "").flatMap(path => splitInto3MBFile(path))
     //sortedSmallFilePaths.foreach(path => Files.delete(Paths.get(path)))
     shuffledFilePaths = toWorkerFilePaths(workerNum)
     toNFilePaths = toWorkerFilePaths.patch(workerNum, Nil, 1).flatten
