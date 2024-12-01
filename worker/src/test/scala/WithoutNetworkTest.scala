@@ -94,7 +94,7 @@ class WithoutNetworkTest extends FunSuite {
             (num * fileSize).toString + " " + fileSize.toString +
             " worker" + (num/fileNum + 1).toString +
             "/" + testName + "_input/input" +
-            (num + 1).toString + ".txt"
+            (num + 1).toString// + ".txt"
         val result = cmd.!!
       }
   }
@@ -151,7 +151,9 @@ class WithoutNetworkTest extends FunSuite {
 
     val pivots = (1 until workerNum).toList.map(num =>sortedSample(sortedSample.length / workerNum * num))
     val end3 = System.nanoTime()
-    val fromN = useParallelism(workers)(_.getToWorkerNFilePaths(new Pivots(pivots)))
+    val fromN = useParallelism(workers.zipWithIndex) { case (worker, index) =>
+      worker.getToWorkerNFilePaths(index, new Pivots(pivots))
+    }
     val end4 = System.nanoTime()
     val toN: List[List[String]] =
       (for {
