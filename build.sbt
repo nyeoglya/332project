@@ -59,8 +59,13 @@ lazy val worker = (project in file("worker"))
   .settings(
     name := "worker",
     libraryDependencies ++= commonDependencies ++ workerDependencies,
-    assembly / mainClass := Some("Main"),
+    assembly / mainClass := Some("worker.Main"),
     assembly / assemblyJarName := s"${name.value}.jar",
+    assembly / test := {},
+    assembly / assemblyMergeStrategy := {
+      case PathList("META-INF", _*) => MergeStrategy.discard
+      case _ => MergeStrategy.first
+    },
     Compile / PB.targets := Seq(
       scalapb.gen(grpc = true) -> (Compile / sourceManaged).value / "scalapb",
       scalapb.zio_grpc.ZioCodeGenerator -> (Compile / sourceManaged).value / "scalapb"
@@ -72,8 +77,13 @@ lazy val master = (project in file("master"))
   .settings(
     name := "master",
     libraryDependencies ++= commonDependencies ++ masterDependencies,
-    assembly / mainClass := Some("Main"),
+    assembly / mainClass := Some("master.Main"),
     assembly / assemblyJarName := s"${name.value}.jar",
+    assembly / test := {},
+    assembly / assemblyMergeStrategy := {
+      case PathList("META-INF", _*) => MergeStrategy.discard
+      case _ => MergeStrategy.first
+    },
     Compile / PB.targets := Seq(
       scalapb.gen(grpc = true) -> (Compile / sourceManaged).value / "scalapb",
       scalapb.zio_grpc.ZioCodeGenerator -> (Compile / sourceManaged).value / "scalapb"
