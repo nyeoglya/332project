@@ -538,7 +538,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     val mergedFilePath = mergeLevel(shuffledFilePaths)
     val resultFilePath = PathMaker.resultFile(workerNum)
     Files.move(Paths.get(mergedFilePath), Paths.get(resultFilePath), StandardCopyOption.REPLACE_EXISTING)
-    toNFilePaths.foreach(path => new File(path).delete())
+    //toNFilePaths.foreach(path => new File(path).delete())
     //toNFilePaths.foreach(path => Files.delete(Paths.get(path)))
     resultFilePath
   }
