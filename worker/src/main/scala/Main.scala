@@ -443,6 +443,8 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     writer.close()
     reader1.close()
     reader2.close()
+    new File(path1).delete()
+    new File(path2).delete()
     //Files.delete(Paths.get(path1))
     //Files.delete(Paths.get(path2))
     filePath
@@ -472,6 +474,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   def getSampleList(offset: Int): List[String] = {
     val sampleFilePaths = useParallelism(sortedSmallFilePaths)(produceSampleFile(_, offset))
     val result = sampleFilePaths.flatMap(path => readFile(path)).map(entity => entity.head)
+    sampleFilePaths.foreach(path => new File(path).delete())
     //sampleFilePaths.foreach(path => Files.delete(Paths.get(path)))
     result
   }
@@ -511,6 +514,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       n <- (0 to partition.pivots.length).toList
       toN = partitionFilePaths.map(_(n))
     } yield toN.filter(_ != "").flatMap(path => splitInto3MBFile(path))
+    sortedSmallFilePaths.foreach(path => new File(path).delete())
     //sortedSmallFilePaths.foreach(path => Files.delete(Paths.get(path)))
     shuffledFilePaths = toWorkerFilePaths(workerNum)
     toNFilePaths = toWorkerFilePaths.patch(workerNum, Nil, 1).flatten
@@ -534,6 +538,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     val mergedFilePath = mergeLevel(shuffledFilePaths)
     val resultFilePath = PathMaker.resultFile(workerNum)
     Files.move(Paths.get(mergedFilePath), Paths.get(resultFilePath), StandardCopyOption.REPLACE_EXISTING)
+    toNFilePaths.foreach(path => new File(path).delete())
     //toNFilePaths.foreach(path => Files.delete(Paths.get(path)))
     resultFilePath
   }
