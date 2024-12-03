@@ -2,8 +2,8 @@
 
 workers=("2.2.2.101" "2.2.2.102" "2.2.2.104" "2.2.2.105" "2.2.2.106" "2.2.2.107" "2.2.2.108" "2.2.2.109" "2.2.2.110" "2.2.2.111")
 home_folder="/home/green"
-remote_folder="$home_folder/dataset/small_output/"
-master_local_folder="$home_folder/validation/"
+remote_folder="$home_folder/dataset/large_output"
+master_local_folder="$home_folder/validation"
 output_file="$home_folder/validation/merged_file"
 
 set -e
@@ -15,12 +15,12 @@ for worker in "${workers[@]}"; do
     # valsort & send results
     ssh "$worker" "
         for FILE in $remote_folder/*; do 
-            valsort \"\$FILE\" > \"$home_folder/${worker}_valsort_result.txt\"
+            ./valsort \"\$FILE\" > \"$home_folder/${worker}_valsort_result.txt\"
         done
     "
 
-    scp "$worker:$home_folder/${worker}_valsort_result.txt" "$master_local_folder/"
-
+    # scp "$worker:$home_folder/${worker}_valsort_result.txt" "$master_local_folder/"
+    
     # extract head & tail from files
     ssh "$worker" "
         for FILE in $remote_folder/*; do
