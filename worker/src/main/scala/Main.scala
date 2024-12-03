@@ -274,7 +274,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   /// functions below are useful tools for implementing workerLogic ///////////////////////////////////////////////////
 
   /** make newFile's path */
-  private object PathMaker {
+  object PathMaker {
     def sortedSmallFile(fileNum: Int) : String = {
       sortedSmallDirectory + "/sorted_" + fileNum.toString + (if(txtMode) ".txt" else "")
     }
@@ -456,16 +456,15 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
 
   /** Merge Two Files
    *
-   * @param num file number(for different naming)
    * @param path1 fst file path
    * @param path2 snd file path
+   * @param mergedFilePath merged file path
    * @return merged file path
    */
-  def mergeTwoFile(num: Int, path1: String, path2: String): String = {
+  def mergeTwoFile(path1: String, path2: String, mergedFilePath: String): String = {
     val reader1 = new BufferedReader(new FileReader(path1))
     val reader2 = new BufferedReader(new FileReader(path2))
-    val filePath = PathMaker.mergedFile(num, path1)
-    val writer = new BufferedWriter(new FileWriter(filePath))
+    val writer = new BufferedWriter(new FileWriter(mergedFilePath))
     @tailrec
     def merge(entity1: Entity, entity2: Entity): Unit = {
       if(entity1 == Entity("","") && entity2 == Entity("","")) ()
@@ -484,7 +483,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     writer.close()
     reader1.close()
     reader2.close()
-    filePath
+    mergedFilePath
   }
 
   /// real logic start here ///////////////////////////////////////////////////////////////////////////////////////////
@@ -528,22 +527,21 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     @tailrec
     def mergeLevel(filePaths: List[String]): String = {
       if (filePaths.length == 1) filePaths.head
+      else if(filePaths.length == 2) mergeTwoFile(filePaths(0), filePaths(1), PathMaker.resultFile(workerNum))
       else {
         val nextFilePaths =
           useParallelism(filePaths.sliding(2, 2).toList.zipWithIndex) {
             case (paths, index) =>
               if (paths.length == 1) paths.head
-              else mergeTwoFile(index, paths(0), paths(1))
+              else mergeTwoFile(paths(0), paths(1), PathMaker.mergedFile(index, paths(0)))
           }
         mergeLevel(nextFilePaths)
       }
     }
-    val mergedFilePath = mergeLevel(shuffledFilePaths)
-    val resultFilePath = PathMaker.resultFile(workerNum)
-    Files.move(Paths.get(mergedFilePath), Paths.get(resultFilePath), StandardCopyOption.REPLACE_EXISTING)
+    mergeLevel(shuffledFilePaths)
+    //Files.move(Paths.get(mergedFilePath), Paths.get(resultFilePath), StandardCopyOption.REPLACE_EXISTING)
     //deleteDirectory(partitionedDirectory)
     //deleteDirectory(mergingDirectory)
-    resultFilePath
   }
 }
 

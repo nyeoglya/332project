@@ -196,7 +196,7 @@ class WithoutNetworkTest extends FunSuite {
     println(s"worker: $workerTime ms | offset: $offsetTime ms | sample: $sampleTime ms")
     println(s"pivot: $pivotTime ms | from: $fromTime ms | merge: $mergeTime ms")
 
-    //checkValidity(workerNum, fileNum, fileSize, testName, resultFilePaths)
+    checkValidity(workerNum, fileNum, fileSize, testName, resultFilePaths)
   }
 
   if(os.contains("win")) {
@@ -260,7 +260,7 @@ class WithoutNetworkTest extends FunSuite {
       createFiles(2, 2, 1000, "4000")
       val worker1 = new WorkerLogic(new worker.Config(worker1Arg))
       val originalLength = worker1.sortedSmallFilePaths.map(path => worker1.readFile(path).length).sum
-      val mergedFilePath = worker1.mergeTwoFile(0, worker1.sortedSmallFilePaths.head, worker1.sortedSmallFilePaths(1))
+      val mergedFilePath = worker1.mergeTwoFile(worker1.sortedSmallFilePaths.head, worker1.sortedSmallFilePaths(1), worker1.PathMaker.resultFile(0))
       val data = worker1.readFile(mergedFilePath)
       assert(data.length == originalLength)
     }
@@ -268,7 +268,7 @@ class WithoutNetworkTest extends FunSuite {
     test("mergeTwoFile test: sort ") {
       createFiles(2, 2, 1000, "4000")
       val worker1 = new WorkerLogic(new worker.Config(worker1Arg))
-      val mergedFilePath = worker1.mergeTwoFile(0, worker1.sortedSmallFilePaths.head, worker1.sortedSmallFilePaths(1))
+      val mergedFilePath = worker1.mergeTwoFile(worker1.sortedSmallFilePaths.head, worker1.sortedSmallFilePaths(1), worker1.PathMaker.resultFile(0))
       val data = worker1.readFile(mergedFilePath)
       assert(isDataSorted(data))
     }
