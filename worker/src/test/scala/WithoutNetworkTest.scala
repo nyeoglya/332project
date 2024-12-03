@@ -220,19 +220,19 @@ class WithoutNetworkTest extends FunSuite {
 
     test("makePartitionedFiles test : N Files ") {
       val worker1 = new WorkerLogic(new worker.Config(worker1Arg))
-      val partitionedFiles = worker1.makePartitionedFiles(worker1.sortedSmallFilePaths.head, List("FP]Wi|7_W9"))
+      val partitionedFiles = worker1.makePartitionedFiles(0, worker1.sortedSmallFilePaths.head, List("FP]Wi|7_W9"))
       assert(partitionedFiles.length == 2)
     }
 
     test("makePartitionedFiles test : length ") {
       val worker1 = new WorkerLogic(new worker.Config(worker1Arg))
-      val partitionedFiles = worker1.makePartitionedFiles(worker1.sortedSmallFilePaths.head, List("FP]Wi|7_W9"))
+      val partitionedFiles = worker1.makePartitionedFiles(0, worker1.sortedSmallFilePaths.head, List("FP]Wi|7_W9"))
       assert(partitionedFiles.map(path => worker1.readFile(path).length).sum == worker1.readFile(worker1.sortedSmallFilePaths.head).length)
     }
 
     test("makePartitionedFiles test : sort ") {
       val worker1 = new WorkerLogic(new worker.Config(worker1Arg))
-      val partitionedFiles = worker1.makePartitionedFiles(worker1.sortedSmallFilePaths.head, List("FP]Wi|7_W9"))
+      val partitionedFiles = worker1.makePartitionedFiles(0, worker1.sortedSmallFilePaths.head, List("FP]Wi|7_W9"))
       val partitionedDatas = partitionedFiles.map(path => worker1.readFile(path))
       assert(partitionedDatas.forall(entities => isDataSorted(entities)))
     }
@@ -282,27 +282,7 @@ class WithoutNetworkTest extends FunSuite {
     }
 
     test("10 entities x 5, 10 worker ") {
-      // before parallelization
-      // test time: 40812.3332 ms
-      // worker: 22491.0053 ms | offset: 1.8241 ms | sample: 1508.7812 ms
-      // pivot: 0.3917 ms | from: 1697.7231 ms | merge: 15112.6078 ms
-
-      // test time: 22083.3851 ms
-      // worker: 4792.2191 ms | offset: 2.1347 ms | sample: 1496.6731 ms
-      // pivot: 0.4116 ms | from: 1732.62 ms | merge: 14059.3266 ms
       automaticTest(10, 5, 10, "small10")
-    }
-
-    test("32MB x 2, 10 worker ") {
-      // before parallelization
-      // test time: 40812.3332 ms
-      // worker: 22491.0053 ms | offset: 1.8241 ms | sample: 1508.7812 ms
-      // pivot: 0.3917 ms | from: 1697.7231 ms | merge: 15112.6078 ms
-
-      // test time: 22083.3851 ms
-      // worker: 4792.2191 ms | offset: 2.1347 ms | sample: 1496.6731 ms
-      // pivot: 0.4116 ms | from: 1732.62 ms | merge: 14059.3266 ms
-      automaticTest(10, 2, 320000, "small")
     }
 
     test("32MB x 2, 2 worker ") {
@@ -314,7 +294,7 @@ class WithoutNetworkTest extends FunSuite {
       // test time: 1767.579 ms
       // worker: 899.224 ms | offset: 0.2581 ms | sample: 222.2038 ms
       // pivot: 0.1433 ms | from: 181.1034 ms | merge: 464.6464 ms
-      automaticTest(2, 2, 320000, "big2")
+      automaticTest(2, 2, 320000, "small2")
     }
 
     test("32MB x 10, 2 worker ") {
@@ -329,6 +309,10 @@ class WithoutNetworkTest extends FunSuite {
       automaticTest(2, 10, 320000, "big10")
     }
 
+    test("32MB x 2, 10 worker ") {
+      automaticTest(10, 2, 320000, "small")
+    }
+
     test("32MB x 10, 10 worker ") {
       // before parallelization
       // test time: 40812.3332 ms
@@ -338,8 +322,13 @@ class WithoutNetworkTest extends FunSuite {
       // test time: 22083.3851 ms
       // worker: 4792.2191 ms | offset: 2.1347 ms | sample: 1496.6731 ms
       // pivot: 0.4116 ms | from: 1732.62 ms | merge: 14059.3266 ms
-      automaticTest(10, 10, 320000, "real10")
+      automaticTest(10, 10, 320000, "big")
     }
+
+    test("32MB x 100, 10 worker ") {
+      automaticTest(10, 100, 320000, "large")
+    }
+
   }
   test("dummy") {
     assert(true)

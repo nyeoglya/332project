@@ -7,6 +7,7 @@ import scalapb.zio_grpc.{ServerMain, ServiceList}
 
 import java.io.{BufferedReader, BufferedWriter, File, FileReader, FileWriter, PrintWriter}
 import java.nio.file.{Files, Paths, StandardCopyOption}
+import sys.process._
 import scala.io.Source
 import io.grpc.StatusException
 import io.grpc.ServerBuilder
@@ -244,31 +245,68 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
    */
   val parallelMode = true
 
+  val windowMode = false
+  val createDirCmd =
+    if(windowMode) "cmd /c mkdir "
+    else "mkdir -p "
+
+  val deleteDirCmd =
+    if(windowMode) "cmd /c rmdir /s /q "
+    else "rm -rf "
+
+  def createDirectroy(originalPath: String, name: String): String = {
+    val index = originalPath.lastIndexOf('/')
+    val root = originalPath.substring(0, index)
+    val path = root + "/" + name
+    val newFolder = new File(path)
+    val deletion = if(newFolder.exists() && newFolder.isDirectory) {
+      " && rmdir /s /q " + name
+    } else ""
+    if(windowMode) {
+      ("cmd /c cd " + root + deletion + " && mkdir " + name).!!
+    } else (s"mkdir -p $path").!!
+    path
+  }
+
+  def osPath(path: String): String ={
+    if(windowMode) path.replaceAll("/", "\\\\")
+    else path.replaceAll("\\\\", "/")
+  }
+
+  val sampleDirectory = createDirectroy(config.outputDirectory.toOption.get, "sample")
+
+  val sortedSmallDirectory = createDirectroy(config.outputDirectory.toOption.get, "sortedSmall")
+
+  val partitionedDirectory = createDirectroy(config.outputDirectory.toOption.get, "partitioned")
+
+  val mergingDirectory = createDirectroy(config.outputDirectory.toOption.get, "merging")
+
   /**
    * make newFile's path
    */
   private object PathMaker {
     def sortedSmallFile(fileNum: Int) : String = {
-      config.outputDirectory.toOption.get + "/sorted_" + fileNum.toString
+      sortedSmallDirectory + "/sorted_" + fileNum.toString
     }
     def sampleFile(filePath : String) : String = {
       val index = filePath.lastIndexOf('/')
-      config.outputDirectory.toOption.get + "/sampled_" + filePath.substring(index + 1)
+      sampleDirectory + "/sampled_" + filePath.substring(index + 1)
     }
-    def partitionedFile(workerNum: Int, filePath: String): String ={
+    def partitionedFile(workerNum: Int, filePath: String, stay: Boolean): String ={
       val index = filePath.lastIndexOf('/')
-      config.outputDirectory.toOption.get + "/to" + workerNum.toString + "_" + filePath.substring(index + 1)
+      if(stay) mergingDirectory + "/to" + workerNum.toString + "_" + filePath.substring(index + 1)
+      else partitionedDirectory + "/to" + workerNum.toString + "_" + filePath.substring(index + 1)
     }
     def _3MBFile(num: Int, filePath: String): String = {
       val index = filePath.lastIndexOf('/')
-      config.outputDirectory.toOption.get + "/s" + num.toString + "_" + filePath.substring(index + 1)
+      partitionedDirectory + "/s" + num.toString + "_" + filePath.substring(index + 1)
     }
     def shuffledFile(num: Int): String = {
-      config.outputDirectory.toOption.get + "/shuffled_" + num.toString + (if(txtMode) ".txt" else "")
+      mergingDirectory + "/shuffled_" + num.toString + (if(txtMode) ".txt" else "")
     }
     def mergedFile(num: Int, filePath: String): String = {
       val index = filePath.lastIndexOf('/')
-      config.outputDirectory.toOption.get + "/m" + num.toString + "_" + filePath.substring(index + 1)
+      mergingDirectory + "/m" + num.toString + "_" + filePath.substring(index + 1)
     }
     def resultFile(num: Int): String = {
       config.outputDirectory.toOption.get + "/merged" + num.toString + (if(txtMode) ".txt" else "")
@@ -339,7 +377,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
    * @return sorted file's path
    */
   private def sortSmallFile(filePath : String, fileNum: Int) : String = {
-    //assert(Files.size(Paths.get(filePath)) < 50000000)
+    assert(Files.size(Paths.get(filePath)) < 50000000)
     val data = readFile(filePath)
     val sortedData = data.sortBy(entity => entity.head)
     val sortedFilePath = PathMaker.sortedSmallFile(fileNum)
@@ -387,7 +425,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
    * @param pivots
    * @return list of partitioned file's path
    */
-  def makePartitionedFiles(filePath : String, pivots : List[String]) : List[String] = {
+  def makePartitionedFiles(workerNum: Int, filePath : String, pivots : List[String]) : List[String] = {
     assert(pivots.nonEmpty)
     val reader = new BufferedReader(new FileReader(filePath))
 
@@ -396,7 +434,9 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       if(entity == Entity("","")) {
         writer.close()
         val oldFilePath =
-          if(count != 0) PathMaker.partitionedFile(index, filePath) else ""
+          if(count != 0)
+            PathMaker.partitionedFile(index, filePath, index == workerNum)
+          else ""
         acc ++ List(oldFilePath)
       }
       else if(index >= pivots.length || entity.head < pivots(index)) {
@@ -407,14 +447,14 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       else {
         writer.close()
         val oldFilePath =
-          if(count != 0) PathMaker.partitionedFile(index, filePath) else ""
-        val newFilePath = PathMaker.partitionedFile(index + 1, filePath)
+          if(count != 0) PathMaker.partitionedFile(index, filePath, index == workerNum) else ""
+        val newFilePath = PathMaker.partitionedFile(index + 1, filePath, index + 1 == workerNum)
         val newAcc = acc ++ List(oldFilePath)
         val newWriter = new BufferedWriter(new FileWriter(newFilePath))
         readPartitionWrite(newAcc, index + 1, newWriter, entity, 0)
       }
     }
-    val writer = new BufferedWriter(new FileWriter(PathMaker.partitionedFile(0, filePath)))
+    val writer = new BufferedWriter(new FileWriter(PathMaker.partitionedFile(0, filePath, 0 == workerNum)))
     val result = readPartitionWrite(List.empty[String], 0, writer, readEntity(reader), 0)
     reader.close()
     result.padTo(pivots.length + 1, "")
@@ -443,8 +483,8 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     writer.close()
     reader1.close()
     reader2.close()
-    new File(path1).delete()
-    new File(path2).delete()
+    //new File(path1).delete()
+    //new File(path2).delete()
     //Files.delete(Paths.get(path1))
     //Files.delete(Paths.get(path2))
     filePath
@@ -474,7 +514,8 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   def getSampleList(offset: Int): List[String] = {
     val sampleFilePaths = useParallelism(sortedSmallFilePaths)(produceSampleFile(_, offset))
     val result = sampleFilePaths.flatMap(path => readFile(path)).map(entity => entity.head)
-    sampleFilePaths.foreach(path => new File(path).delete())
+    (deleteDirCmd + osPath(sampleDirectory)).!
+    //sampleFilePaths.foreach(path => new File(path).delete())
     //sampleFilePaths.foreach(path => Files.delete(Paths.get(path)))
     result
   }
@@ -509,12 +550,13 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       }
       else List(filePath)
     }
-    val partitionFilePaths = useParallelism(sortedSmallFilePaths)(makePartitionedFiles(_, partition.pivots.toList))
+    val partitionFilePaths = useParallelism(sortedSmallFilePaths)(makePartitionedFiles(workerNum, _, partition.pivots.toList))
     val toWorkerFilePaths = for {
       n <- (0 to partition.pivots.length).toList
       toN = partitionFilePaths.map(_(n))
     } yield toN.filter(_ != "").flatMap(path => splitInto3MBFile(path))
-    sortedSmallFilePaths.foreach(path => new File(path).delete())
+    (deleteDirCmd + osPath(sortedSmallDirectory)).!
+    //sortedSmallFilePaths.foreach(path => new File(path).delete())
     //sortedSmallFilePaths.foreach(path => Files.delete(Paths.get(path)))
     shuffledFilePaths = toWorkerFilePaths(workerNum)
     toNFilePaths = toWorkerFilePaths.patch(workerNum, Nil, 1).flatten
@@ -538,6 +580,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     val mergedFilePath = mergeLevel(shuffledFilePaths)
     val resultFilePath = PathMaker.resultFile(workerNum)
     Files.move(Paths.get(mergedFilePath), Paths.get(resultFilePath), StandardCopyOption.REPLACE_EXISTING)
+    //(deleteDirCmd + osPath(mergingDirectory)).!
     //toNFilePaths.foreach(path => new File(path).delete())
     //toNFilePaths.foreach(path => Files.delete(Paths.get(path)))
     resultFilePath
