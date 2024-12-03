@@ -1,12 +1,14 @@
 #!/bin/bash
 
 workers=("2.2.2.101" "2.2.2.102" "2.2.2.104" "2.2.2.105" "2.2.2.106" "2.2.2.107" "2.2.2.108" "2.2.2.109" "2.2.2.110" "2.2.2.111")
+name="$1"
 home_folder="/home/green"
-remote_folder="$home_folder/dataset/small_output/"
-master_local_folder="$home_folder/validation/"
+remote_folder="$home_folder/dataset/${name}_output"
+master_local_folder="$home_folder/validation"
 output_file="$home_folder/validation/merged_file"
 
 set -e
+rm -rf $master_loacl_folder
 mkdir -p "$master_local_folder"
 
 for worker in "${workers[@]}"; do
@@ -15,7 +17,7 @@ for worker in "${workers[@]}"; do
     # valsort & send results
     ssh "$worker" "
         for FILE in $remote_folder/*; do 
-            valsort \"\$FILE\" > \"$home_folder/${worker}_valsort_result.txt\"
+            ./valsort \"\$FILE\" > \"$home_folder/${worker}_valsort_result.txt\"
         done
     "
 
@@ -43,6 +45,7 @@ find "$master_local_folder" -type f | sort | while read -r FILE; do
   echo -e "\n" >> "$output_file" # add \n between files
 done
 
-valsort $output_file > $home_folder/result.txt # final valsort result file
+cd $home_folder
+./valsort $output_file > $home_folder/result.txt # final valsort result file
 
 echo "Complete work from worker. Results were saved in $master_local_folder."
