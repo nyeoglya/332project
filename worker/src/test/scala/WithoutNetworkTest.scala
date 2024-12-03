@@ -245,14 +245,14 @@ class WithoutNetworkTest extends FunSuite {
       createFiles(2, 2, 1000, "4000")
       val worker1 = new WorkerLogic(new worker.Config(worker1Arg))
       val partitionedFiles = worker1.makePartitionedFiles(0, worker1.sortedSmallFilePaths.head, List("FP]Wi|7_W9"))
-      assert(partitionedFiles.map(path => worker1.readFile(path).length).sum == worker1.readFile(worker1.sortedSmallFilePaths.head).length)
+      assert(partitionedFiles.map(paths => paths.map(worker1.readFile(_).length).sum).sum == worker1.readFile(worker1.sortedSmallFilePaths.head).length)
     }
 
     test("makePartitionedFiles test : sort ") {
       createFiles(2, 2, 1000, "4000")
       val worker1 = new WorkerLogic(new worker.Config(worker1Arg))
       val partitionedFiles = worker1.makePartitionedFiles(0, worker1.sortedSmallFilePaths.head, List("FP]Wi|7_W9"))
-      val partitionedDatas = partitionedFiles.map(path => worker1.readFile(path))
+      val partitionedDatas = partitionedFiles.map(_.flatMap(worker1.readFile))
       assert(partitionedDatas.forall(entities => isDataSorted(entities)))
     }
 
