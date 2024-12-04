@@ -10,7 +10,7 @@ import sys.process._
 import io.grpc.StatusException
 import io.grpc.ServerBuilder
 import io.grpc.protobuf.services.ProtoReflectionService
-import proto.common.{DataResponse, Entity, Pivots, SampleRequest, SortResponse}
+import proto.common.{DataResponse, Entity, Pivots, SampleRequest, ShuffleResponse}
 import proto.common.ZioCommon.WorkerService
 import scalapb.zio_grpc
 
@@ -28,6 +28,7 @@ import java.nio.charset.StandardCharsets
 import scala.annotation.tailrec
 import proto.common.DataRequest
 import proto.common.ZioCommon.WorkerServiceClient
+import proto.common.{MergeRequest, MergeResponse}
 
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
@@ -109,7 +110,7 @@ object Main extends ZIOAppDefault {
       }
     }
 
-    def startShuffle(request: ShuffleRequest): IO[StatusException,SortResponse] = {
+    def startShuffle(request: ShuffleRequest): IO[StatusException,ShuffleResponse] = {
       println(s"StartShuffle with index ${request.workerNumber} requested")
       service.workerNumber = request.workerNumber
       println("Worker addresses:")
@@ -168,29 +169,28 @@ object Main extends ZIOAppDefault {
       result.catchAllCause(cause => 
         ZIO.succeed {
           println(s"Shuffle Request failed: $cause")
-          SortResponse()
+          ShuffleResponse()
         }
-        ).map(value => SortResponse())
+        ).map(value => ShuffleResponse())
     } 
+
 
     def sendData(request: DataRequest): IO[StatusException,DataResponse] = {
       println(s"Get data fregment from worker[${request.workerNumber}]")
       service.writeNetworkFile(request.payload.toList)
-      if (!request.hasNext) {
-        println(s"All data received from worker[${request.workerNumber}]")
-        service.receivedWorker += 1
-      }
-      if (service.receivedWorker == service.totalWorker - 1) {
-        println(s"Start merging files")
-        service.mergeWrite(service.workerNumber)
-        println(s"Complete Sorting")
-      }
       ZIO.succeed(DataResponse())
     }.catchAllCause { cause => 
       ZIO.succeed {
         println(s"Send data Error cause: $cause")
         DataResponse()
       }
+    }
+
+    def startMerge(request: MergeRequest): IO[StatusException,MergeResponse] = {
+      println(s"Start merging files")
+      service.mergeWrite(service.workerNumber)
+      println(s"Complete Sorting")
+      ZIO.succeed(MergeResponse())
     }
   }
 }

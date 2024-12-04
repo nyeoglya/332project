@@ -8,8 +8,9 @@ service MasterService {
 
 service WorkerService {
 	rpc GetSamples (SampleRequest) returns (Pivots);
-	rpc StartShuffle (ShuffleRequest) returns (SortResponse);
+	rpc StartShuffle (ShuffleRequest) returns (ShuffleResponse);
 	rpc SendData (DataRequest) returns (DataResponse);
+	rpc StartMerge (MergeRequest) returns (MergeResponse);
 }
 
 message WorkerData {
@@ -18,9 +19,6 @@ message WorkerData {
 }
 message WorkerDataResponse {}
 
-message SampleRequest {
-	int32 offset = 1;
-}
 
 message Entity {
 	string head = 1;
@@ -36,21 +34,29 @@ message Address {
 	int32 port = 2;
 }
 
-message ShuffleRequest {
-	Pivots pivots = 1;
-	repeated Address workerAddresses = 2;
-	int32 workerNumber = 3;
+message SampleRequest {
+	int32 offset = 1;
 }
 
 message SampleResponse {
 	repeated string pivots = 1;
 }
 
-message SortResponse {}
+message ShuffleRequest {
+	Pivots pivots = 1;
+	repeated Address workerAddresses = 2;
+	int32 workerNumber = 3;
+}
+
+message ShuffleResponse {}
 
 message DataRequest {
 	int32 workerNumber = 1;
 	bool has_next = 2;
 	repeated Entity payload = 3;
 }
+
 message DataResponse {}
+
+message MergeRequest {}
+message MergeResponse {}
