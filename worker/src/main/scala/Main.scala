@@ -29,7 +29,8 @@ import scala.annotation.tailrec
 import proto.common.DataRequest
 import proto.common.ZioCommon.WorkerServiceClient
 import proto.common.{MergeRequest, MergeResponse}
-
+import zio.CanFail.canFailAmbiguous1
+import java.util.concurrent.atomic.AtomicInteger
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val masterAddress = trailArg[String](required = true, descr = "Mater address (e.g. 192.168.0.1:8000)", default = Some("127.0.0.1"))
@@ -309,9 +310,9 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       val availableThreads = 8
       val parallel: ZIO[Any, Throwable, List[B]] = {
         if(target.length <= availableThreads * 2)
-          ZIO.foreachPar(target)(item => ZIO.succeed(func(item)))
+          ZIO.foreachPar(target)(item => ZIO.succeed(func(item)).retry(Schedule.forever))
         else
-          ZIO.foreach(target.grouped(availableThreads).toList)(chunk => ZIO.foreachPar(chunk){item => ZIO.succeed(func(item))}).map(_.flatten)
+          ZIO.foreach(target.grouped(availableThreads).toList)(chunk => ZIO.foreachPar(chunk){item => ZIO.succeed(func(item)).retry(Schedule.forever)}).map(_.flatten)
       }
       Unsafe unsafe {implicit unsafe =>
         Runtime.default.unsafe.run(parallel).getOrThrow()
@@ -360,8 +361,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
    * @param data data to write
    */
   def writeNetworkFile(data: List[Entity]): Unit = {
-    val filePath = PathMaker.shuffledFile(shuffledFileCount)
-    shuffledFileCount = shuffledFileCount + 1
+    val filePath = PathMaker.shuffledFile(shuffledFileCount.incrementAndGet())
     shuffledFilePaths = filePath::shuffledFilePaths
     writeFile(filePath, data)
   }
@@ -490,7 +490,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
 
   private var totalFileSize: Long = 0
   /** for different naming of received file */
-  private var shuffledFileCount: Int = 0
+  private var shuffledFileCount: AtomicInteger = new AtomicInteger(0)
   /** files that will be merged */
   private var shuffledFilePaths: List[String] = List.empty[String]
 
@@ -538,10 +538,10 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
         mergeLevel(nextFilePaths)
       }
     }
-    mergeLevel(shuffledFilePaths)
-    //Files.move(Paths.get(mergedFilePath), Paths.get(resultFilePath), StandardCopyOption.REPLACE_EXISTING)
-    //deleteDirectory(partitionedDirectory)
-    //deleteDirectory(mergingDirectory)
+    val result = mergeLevel(shuffledFilePaths)
+    deleteDirectory(partitionedDirectory)
+    deleteDirectory(mergingDirectory)
+    result
   }
 }
 
