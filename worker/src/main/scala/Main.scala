@@ -2,12 +2,11 @@ package worker
 
 import org.rogach.scallop._
 import zio._
-import zio.stream._
 import scalapb.zio_grpc.{ServerMain, ServiceList}
 
 import java.io.{BufferedReader, BufferedWriter, File, FileReader, FileWriter, PrintWriter}
 import java.nio.file.{Files, Paths, StandardCopyOption}
-import scala.io.Source
+import sys.process._
 import io.grpc.StatusException
 import io.grpc.ServerBuilder
 import io.grpc.protobuf.services.ProtoReflectionService
@@ -15,7 +14,6 @@ import proto.common.{DataResponse, Entity, Pivots, SampleRequest, ShuffleRespons
 import proto.common.ZioCommon.WorkerService
 import scalapb.zio_grpc
 
-import scala.collection.mutable.PriorityQueue
 import scala.language.postfixOps
 import proto.common.ShuffleRequest
 import proto.common.ZioCommon.MasterServiceClient
@@ -23,7 +21,6 @@ import io.grpc.ManagedChannelBuilder
 import proto.common.WorkerData
 import proto.common.WorkerDataResponse
 import common.AddressParser
-import zio.stream.ZStream.{HaltStrategy, fromQueue}
 import io.grpc.Status
 
 import java.awt.image.DataBufferDouble
@@ -207,7 +204,7 @@ trait WorkerServiceLogic {
     *
     * @return Int of bytes of file size
     */
-  def getFileSize(): Long
+  def getFileSize: Long
 
   /** Get sample list
     * 
@@ -218,53 +215,80 @@ trait WorkerServiceLogic {
   /** Get file paths List
    * n-th elem : file path List that will be sent to worker n
    *
-   * @param partition
+   * @param workerNum worker's number
+   * @param partition pivot list
    * @return
    */
   def getToWorkerNFilePaths(workerNum: Int, partition: Pivots): List[List[String]]
 
-  /** Merge given files using bottom up merge sort
+  /** Read file in given path, and return it's entities
    *
-   * @param workerNum
-   * @param partitionedFilePaths
+   * @param filePath path of file to read
+   * @return
+   */
+  def readFile(filePath : String) : List[Entity]
+
+  /** Make new file with given data
+   * new file is created on 'merging' directory
+   *
+   * @param data data to write
+   */
+  def writeNetworkFile(data: List[Entity]): Unit
+
+  /** Merge given files using bottom up merge sort
+   * it should be called after shuffling is done
+   *
+   * @param workerNum worker's number
    * @return
    */
   def mergeWrite(workerNum: Int) : String
-
-  def readFile(filePath : String) : List[Entity]
-
-  def writeNetworkFile(data: List[Entity]): Unit
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 class WorkerLogic(config: Config) extends WorkerServiceLogic {
-  /**
-   * for test & comparing
-   */
+  /** for test & comparing */
   val parallelMode = true
+  /** provide dual mode(window & linux) */
+  private val windowMode = false
 
-  /**
-   * make newFile's path
-   */
-  private object PathMaker {
+  private def osPath(path: String): String = if(windowMode) path.replaceAll("/", "\\\\") else path.replaceAll("\\\\", "/")
+
+  private def createDirectory(originalPath: String, name: String): String = {
+    val path = originalPath.substring(0, originalPath.lastIndexOf('/')) + "/" + name
+    if(windowMode) ("cmd /c mkdir " + osPath(path)).!!
+    else ("mkdir -p " + osPath(path)).!!
+    path
+  }
+
+  private def deleteDirectory(path: String): Unit = {
+    if(windowMode) ("cmd /c rmdir /s /q " + osPath(path)).!!
+    else ("rm -rf " + osPath(path)).!!
+  }
+
+  /// create intermediate directories /////////////////////////////////////////////////////////////////////////////////
+  private val sortedSmallDirectory = createDirectory(config.outputDirectory.toOption.get, "sortedSmall")
+  private val partitionedDirectory = createDirectory(config.outputDirectory.toOption.get, "partitioned")
+  private val mergingDirectory = createDirectory(config.outputDirectory.toOption.get, "merging")
+
+  /// functions below are useful tools for implementing workerLogic ///////////////////////////////////////////////////
+
+  /** make newFile's path */
+  object PathMaker {
     def sortedSmallFile(fileNum: Int) : String = {
-      config.outputDirectory.toOption.get + "/sorted_" + fileNum.toString
+      sortedSmallDirectory + "/sorted_" + fileNum.toString + (if(txtMode) ".txt" else "")
     }
-    def sampleFile(filePath : String) : String = {
+    def partitionedFile(workerNum: Int, num4MB: Int, filePath: String, stay: Boolean): String ={
       val index = filePath.lastIndexOf('/')
-      config.outputDirectory.toOption.get + "/sampled_" + filePath.substring(index + 1)
-    }
-    def partitionedFile(workerNum: Int, filePath: String): String ={
-      val index = filePath.lastIndexOf('/')
-      config.outputDirectory.toOption.get + "/to" + workerNum.toString + "_" + filePath.substring(index + 1)
+      if(stay) mergingDirectory + "/to" + workerNum.toString + "_" + num4MB + "_" + filePath.substring(index + 1)
+      else partitionedDirectory + "/to" + workerNum.toString + "_" + num4MB + "_" + filePath.substring(index + 1)
     }
     def shuffledFile(num: Int): String = {
-      config.outputDirectory.toOption.get + "/shuffled_" + num.toString + (if(txtMode) ".txt" else "")
+      mergingDirectory + "/shuffled_" + num.toString + (if(txtMode) ".txt" else "")
     }
     def mergedFile(num: Int, filePath: String): String = {
       val index = filePath.lastIndexOf('/')
-      config.outputDirectory.toOption.get + "/m" + num.toString + "_" + filePath.substring(index + 1)
+      mergingDirectory + "/m" + num.toString + "_" + filePath.substring(index + 1)
     }
     def resultFile(num: Int): String = {
       config.outputDirectory.toOption.get + "/merged" + num.toString + (if(txtMode) ".txt" else "")
@@ -274,15 +298,15 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   /** you can exploit parallelism using this function
    * achieve about 2 times higher overall performance
    *
-   * @param target
-   * @param func
-   * @tparam A
-   * @tparam B
+   * @param target target list
+   * @param func apply to target element
+   * @tparam A target element type
+   * @tparam B result element type
    * @return
    */
   def useParallelism[A, B](target: List[A])(func: A => B): List[B] = {
     if(parallelMode) {
-      val availableThreads = java.lang.Runtime.getRuntime.availableProcessors()
+      val availableThreads = 8
       val parallel: ZIO[Any, Throwable, List[B]] = {
         if(target.length <= availableThreads * 2)
           ZIO.foreachPar(target)(item => ZIO.succeed(func(item)))
@@ -300,8 +324,8 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
 
   /** read one entity
    *
-   * @param reader
-   * @return read entity (success) | Entity("","") (fail)
+   * @param reader bufferedReader
+   * @return entity (success) or Entity("","") (fail)
    */
   private def readEntity(reader: BufferedReader): Entity = {
     val line = reader.readLine()
@@ -309,6 +333,10 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     else Entity(line.splitAt(10)._1, line.splitAt(10)._2 + "\r\n")
   }
 
+  /** Read one File
+   *
+   * @param filePath file path to read
+   */
   def readFile(filePath : String) : List[Entity] = {
     val reader = new BufferedReader(new FileReader(filePath))
     val entities = Iterator.continually(readEntity(reader)).takeWhile(_ != Entity("","")).toList
@@ -316,111 +344,127 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     entities
   }
 
+  /** Write File on given file path
+   *
+   * @param filePath given file path
+   * @param data data to write
+   */
   private def writeFile(filePath : String, data : List[Entity]) : Unit = {
     val writer = new BufferedWriter(new FileWriter(filePath))
     data.foreach(entity => {writer.write(entity.head); writer.write(entity.body)})
     writer.close()
   }
 
+  /** save given data on 'merging' directory
+   *
+   * @param data data to write
+   */
   def writeNetworkFile(data: List[Entity]): Unit = {
     val filePath = PathMaker.shuffledFile(shuffledFileCount)
     shuffledFileCount = shuffledFileCount + 1
-    writeFile(filePath, data)
     shuffledFilePaths = filePath::shuffledFilePaths
+    writeFile(filePath, data)
   }
 
   /** sort given file in memory and save them on new file
    *
-   * @param filePath
+   * @param filePath given file's path
+   * @param fileNum file number(for different naming)
    * @return sorted file's path
    */
   private def sortSmallFile(filePath : String, fileNum: Int) : String = {
-    //assert(Files.size(Paths.get(filePath)) < 50000000)
-    val data = readFile(filePath)
-    val sortedData = data.sortBy(entity => entity.head)
+    assert(new File(filePath).length < 50000000)
     val sortedFilePath = PathMaker.sortedSmallFile(fileNum)
+    val sortedData = readFile(filePath).sortBy(entity => entity.head)
     writeFile(sortedFilePath, sortedData)
     sortedFilePath
   }
 
-  /** make sample file from given file by read with an given offset
-   * after change structure
-   * from   file -> List -
-   * @param filePath
-   * @param offset
+  /** make sample list from given file by read with an given offset
+   *
+   * @param filePath given file
+   * @param offset stride
    * @return sample file's path
    */
-  def produceSampleFile(filePath : String, offset : Int) : String = {
+  def produceSample(filePath : String, offset : Int) : List[String] = {
     assert(offset > 0)
     val reader = new BufferedReader(new FileReader(filePath))
-    val sampledFilePath = PathMaker.sampleFile(filePath)
-    val writer = new BufferedWriter(new FileWriter(sampledFilePath))
     @tailrec
-    def readOffsetWrite(count: Int): Unit = {
+    def readOffset(acc: List[String], count: Int): List[String] = {
       val entity = readEntity(reader)
-      if(entity == Entity("","")) ()
+      if (entity == Entity("", "")) acc
       else {
-        if(count % offset == 0){
-          writer.write(entity.head)
-          writer.write(entity.body)
-        }
-        readOffsetWrite(count + 1)
+        if (count % offset == 0) readOffset(acc ++ List(entity.head), count + 1)
+        else readOffset(acc, count + 1)
       }
     }
-    readOffsetWrite(0)
+    val result = readOffset(List.empty[String], 0)
     reader.close()
-    writer.close()
-    sampledFilePath
+    result
   }
 
   /** split given file into N partitioned files using given pivots
    * after change function structure
-   * from   file -> List -> files
-   * to     file -> files
-   * achieve about 2 times higher performance in partitioning
+   * if partitioned file's size exceed 4MB, split them
    *
-   * @param filePath
-   * @param pivots
-   * @return list of partitioned file's path
+   * @param workerNum present worker number
+   * @param filePath given file path
+   * @param pivots pivot list
+   * @return list of partitioned files(it can be multiple when < 4MB)
    */
-  def makePartitionedFiles(filePath : String, pivots : List[String]) : List[String] = {
+  def makePartitionedFiles(workerNum: Int, filePath : String, pivots : List[String]) : List[List[String]] = {
     assert(pivots.nonEmpty)
     val reader = new BufferedReader(new FileReader(filePath))
 
     @tailrec
-    def readPartitionWrite(acc: List[String], index: Int, writer: BufferedWriter, entity: Entity, count: Int): List[String] = {
-      if(entity == Entity("","")) {
+    def readPartitionWrite(acc: List[List[String]], acc4MB: List[String], index: Int, index4MB: Int,
+                           writer: BufferedWriter, entity: Entity, count: Int): List[List[String]] = {
+      if (entity == Entity("", "")) {
         writer.close()
         val oldFilePath =
-          if(count != 0) PathMaker.partitionedFile(index, filePath) else ""
-        acc ++ List(oldFilePath)
+          if (count != 0)
+            PathMaker.partitionedFile(index, index4MB, filePath, index == workerNum)
+          else ""
+        acc ++ List(acc4MB ++ List(oldFilePath))
       }
-      else if(index >= pivots.length || entity.head < pivots(index)) {
+      else if(count >= 39000) {
+        writer.close()
+        val oldFilePath = PathMaker.partitionedFile(index, index4MB, filePath, index == workerNum)
+        val newFilePath = PathMaker.partitionedFile(index, index4MB + 1, filePath, index == workerNum)
+        val newWriter = new BufferedWriter(new FileWriter(newFilePath))
+        readPartitionWrite(acc, acc4MB ++ List(oldFilePath), index, index4MB + 1, newWriter, entity, 0)
+      }
+      else if (index >= pivots.length || entity.head < pivots(index)) {
         writer.write(entity.head)
         writer.write(entity.body)
-        readPartitionWrite(acc, index, writer, readEntity(reader), count + 1)
+        readPartitionWrite(acc, acc4MB, index, index4MB, writer, readEntity(reader), count + 1)
       }
       else {
         writer.close()
         val oldFilePath =
-          if(count != 0) PathMaker.partitionedFile(index, filePath) else ""
-        val newFilePath = PathMaker.partitionedFile(index + 1, filePath)
-        val newAcc = acc ++ List(oldFilePath)
+          if (count != 0) PathMaker.partitionedFile(index, index4MB, filePath, index == workerNum) else ""
+        val newFilePath = PathMaker.partitionedFile(index + 1, 0, filePath, index + 1 == workerNum)
         val newWriter = new BufferedWriter(new FileWriter(newFilePath))
-        readPartitionWrite(newAcc, index + 1, newWriter, entity, 0)
+        readPartitionWrite(acc ++ List(acc4MB ++ List(oldFilePath)), List(), index + 1, 0, newWriter, entity, 0)
       }
     }
-    val writer = new BufferedWriter(new FileWriter(PathMaker.partitionedFile(0, filePath)))
-    val result = readPartitionWrite(List.empty[String], 0, writer, readEntity(reader), 0)
+    val writer = new BufferedWriter(new FileWriter(PathMaker.partitionedFile(0, 0, filePath, 0 == workerNum)))
+    val result = readPartitionWrite(List(), List(), 0, 0, writer, readEntity(reader), 0)
     reader.close()
-    result.padTo(pivots.length + 1, "")
+    result.padTo(pivots.length + 1, List(""))
   }
 
-  def mergeTwoFile(num: Int, path1: String, path2: String): String = {
+  /** Merge Two Files
+   *
+   * @param path1 fst file path
+   * @param path2 snd file path
+   * @param mergedFilePath merged file path
+   * @return merged file path
+   */
+  def mergeTwoFile(path1: String, path2: String, mergedFilePath: String): String = {
     val reader1 = new BufferedReader(new FileReader(path1))
     val reader2 = new BufferedReader(new FileReader(path2))
-    val filePath = PathMaker.mergedFile(num, path1)
-    val writer = new BufferedWriter(new FileWriter(filePath))
+    val writer = new BufferedWriter(new FileWriter(mergedFilePath))
     @tailrec
     def merge(entity1: Entity, entity2: Entity): Unit = {
       if(entity1 == Entity("","") && entity2 == Entity("","")) ()
@@ -439,66 +483,65 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     writer.close()
     reader1.close()
     reader2.close()
-    //Files.delete(Paths.get(path1))
-    //Files.delete(Paths.get(path2))
-    filePath
+    mergedFilePath
   }
 
+  /// real logic start here ///////////////////////////////////////////////////////////////////////////////////////////
+
+  private var totalFileSize: Long = 0
+  /** for different naming of received file */
+  private var shuffledFileCount: Int = 0
+  /** files that will be merged */
+  private var shuffledFilePaths: List[String] = List.empty[String]
+
+  /** collect original given input files */
   private val originalSmallFilePaths : List[String] = {
     config.inputDirectories.toOption.getOrElse(List(""))
       .flatMap{ directoryPath =>
         val directory = new File(directoryPath)
+        totalFileSize += directory.listFiles.filter(_.isFile).map(_.length).sum
         directory.listFiles.map(_.getPath.replace("\\", "/")).toList
       }
   }
-
+  /** acknowledge file's format */
   private val txtMode = originalSmallFilePaths.head.endsWith(".txt")
-
+  /** sort each given input files in parallel */
   val sortedSmallFilePaths: List[String] = useParallelism(originalSmallFilePaths.zipWithIndex){case (path, index) => sortSmallFile(path, index)}
 
-  private var toNFilePaths: List[String] = List.empty[String]
-  private var shuffledFileCount: Int = 0
-  private var shuffledFilePaths: List[String] = List.empty[String]
-
-  // TODO: Read files from storage
-  def getFileSize(): Long = originalSmallFilePaths.map(path => Files.size(Paths.get(path))).sum.toLong
+  def getFileSize: Long = totalFileSize
   def getSampleList(offset: Int): List[String] = {
-    val sampleFilePaths = useParallelism(sortedSmallFilePaths)(produceSampleFile(_, offset))
-    val result = sampleFilePaths.flatMap(path => readFile(path)).map(entity => entity.head)
-    //sampleFilePaths.foreach(path => Files.delete(Paths.get(path)))
-    result
+    assert(offset > 0 && totalFileSize / offset < 1000000)
+    useParallelism(sortedSmallFilePaths)(produceSample(_, offset)).flatten[String]
   }
   def getToWorkerNFilePaths(workerNum: Int, partition: Pivots): List[List[String]] = {
-    val partitionFilePaths = useParallelism(sortedSmallFilePaths)(makePartitionedFiles(_, partition.pivots.toList))
-    val toWorkerFilePaths = for {
+    val partitionFilePaths = useParallelism(sortedSmallFilePaths)(makePartitionedFiles(workerNum, _, partition.pivots.toList))
+    val toN = for {
       n <- (0 to partition.pivots.length).toList
-      toN = partitionFilePaths.map(_(n))
-    } yield toN.filter(_ != "")
-    //sortedSmallFilePaths.foreach(path => Files.delete(Paths.get(path)))
-    shuffledFilePaths = toWorkerFilePaths(workerNum)
-    toNFilePaths = toWorkerFilePaths.patch(workerNum, Nil, 1).flatten
-    toWorkerFilePaths
+      toN = partitionFilePaths.flatMap(_(n)).filter(_ != "")
+    } yield toN
+    deleteDirectory(sortedSmallDirectory)
+    shuffledFilePaths = toN(workerNum)
+    toN
   }
-
   def mergeWrite(workerNum: Int) : String = {
     @tailrec
     def mergeLevel(filePaths: List[String]): String = {
-      if(filePaths.length == 1) filePaths.head
+      if (filePaths.length == 1) filePaths.head
+      else if(filePaths.length == 2) mergeTwoFile(filePaths(0), filePaths(1), PathMaker.resultFile(workerNum))
       else {
         val nextFilePaths =
-          useParallelism(filePaths.sliding(2,2).toList.zipWithIndex){
+          useParallelism(filePaths.sliding(2, 2).toList.zipWithIndex) {
             case (paths, index) =>
               if (paths.length == 1) paths.head
-              else mergeTwoFile(index, paths(0), paths(1))
+              else mergeTwoFile(paths(0), paths(1), PathMaker.mergedFile(index, paths(0)))
           }
         mergeLevel(nextFilePaths)
       }
     }
-    val mergedFilePath = mergeLevel(shuffledFilePaths)
-    val resultFilePath = PathMaker.resultFile(workerNum)
-    Files.move(Paths.get(mergedFilePath), Paths.get(resultFilePath), StandardCopyOption.REPLACE_EXISTING)
-    //toNFilePaths.foreach(path => Files.delete(Paths.get(path)))
-    resultFilePath
+    mergeLevel(shuffledFilePaths)
+    //Files.move(Paths.get(mergedFilePath), Paths.get(resultFilePath), StandardCopyOption.REPLACE_EXISTING)
+    //deleteDirectory(partitionedDirectory)
+    //deleteDirectory(mergingDirectory)
   }
 }
 
