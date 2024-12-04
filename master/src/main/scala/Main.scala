@@ -25,9 +25,11 @@ import io.grpc.{Metadata, ServerCall, ServerCallHandler}
 import io.grpc.ServerCall.Listener
 import io.grpc.ForwardingClientCallListener
 import io.grpc.ForwardingServerCallListener
-import proto.common.SortResponse
 import proto.common.Address
 import java.lang
+import proto.common.ShuffleResponse
+import proto.common.MergeResponse
+import proto.common.MergeRequest
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val workerNum = trailArg[Int](required = true, descr = "Number of workers", default = Some(1))
@@ -163,6 +165,16 @@ class MasterLogic(config: Config) {
         }
       }}
       _ <- zio.Console.printLine("Shffule request complete.")
+      result <- ZIO.foreachPar(clients.map(_.client).zipWithIndex) { 
+        case (layer, index) => 
+          requestMerge().provideLayer(layer)
+      }.catchAllCause { cause => {
+        ZIO.fail {
+          println(s"Merge request fail: $cause")
+          new RuntimeException("REQUESTMERGE")
+        }
+      }}
+      _ <- zio.Console.printLine("Merge request complete.")
     } yield result
   }.catchAllCause { cause => {
     ZIO.fail {
@@ -174,12 +186,17 @@ class MasterLogic(config: Config) {
   def collectSample: ZIO[WorkerServiceClient, Throwable, Pivots] =
     ZIO.serviceWithZIO[WorkerServiceClient] { workerServiceClient =>
       workerServiceClient.getSamples(SampleRequest(offset))
-  }
+    }
 
-  def sendPartition(number: Int, pivots: Pivots): ZIO[WorkerServiceClient, Throwable, SortResponse] =
+  def sendPartition(number: Int, pivots: Pivots): ZIO[WorkerServiceClient, Throwable, ShuffleResponse] =
     ZIO.serviceWithZIO[WorkerServiceClient] { workerServiceClient => 
       workerServiceClient.startShuffle(ShuffleRequest(pivots = Some(pivots), workerAddresses = workerIpList, workerNumber = number))
-   }
+    }
+
+  def requestMerge(): ZIO[WorkerServiceClient, Throwable, MergeResponse] = 
+    ZIO.serviceWithZIO[WorkerServiceClient] { workerServiceClient =>
+      workerServiceClient.startMerge(MergeRequest())
+    }
 
   def selectPivots(pivotCandidateListOriginal: List[Pivots]): Pivots = {
     assert { !pivotCandidateListOriginal.isEmpty }
