@@ -29,8 +29,11 @@ import scala.annotation.tailrec
 import proto.common.DataRequest
 import proto.common.ZioCommon.WorkerServiceClient
 import proto.common.{MergeRequest, MergeResponse}
-import zio.CanFail.canFailAmbiguous1
+
+import java.util
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.ConcurrentLinkedQueue
+import scala.collection.convert.ImplicitConversions.`iterator asScala`
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val masterAddress = trailArg[String](required = true, descr = "Mater address (e.g. 192.168.0.1:8000)", default = Some("127.0.0.1"))
@@ -310,9 +313,9 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       val availableThreads = 8
       val parallel: ZIO[Any, Throwable, List[B]] = {
         if(target.length <= availableThreads * 2)
-          ZIO.foreachPar(target)(item => ZIO.succeed(func(item)).retry(Schedule.forever))
+          ZIO.foreachPar(target)(item => ZIO.succeed(func(item)))
         else
-          ZIO.foreach(target.grouped(availableThreads).toList)(chunk => ZIO.foreachPar(chunk){item => ZIO.succeed(func(item)).retry(Schedule.forever)}).map(_.flatten)
+          ZIO.foreach(target.grouped(availableThreads).toList)(chunk => ZIO.foreachPar(chunk){item => ZIO.succeed(func(item))}).map(_.flatten)
       }
       Unsafe unsafe {implicit unsafe =>
         Runtime.default.unsafe.run(parallel).getOrThrow()
@@ -362,7 +365,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
    */
   def writeNetworkFile(data: List[Entity]): Unit = {
     val filePath = PathMaker.shuffledFile(shuffledFileCount.incrementAndGet())
-    shuffledFilePaths = filePath::shuffledFilePaths
+    shuffledFilePaths.add(filePath)
     writeFile(filePath, data)
   }
 
@@ -383,10 +386,11 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   /** make sample list from given file by read with an given offset
    *
    * @param filePath given file
+   * @param start start offset that helps logic to produce sample evenly
    * @param offset stride
    * @return sample file's path
    */
-  def produceSample(filePath : String, offset : Int) : List[String] = {
+  def produceSample(filePath : String, start: Int, offset : Int) : List[String] = {
     assert(offset > 0)
     val reader = new BufferedReader(new FileReader(filePath))
     @tailrec
@@ -394,7 +398,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       val entity = readEntity(reader)
       if (entity == Entity("", "")) acc
       else {
-        if (count % offset == 0) readOffset(acc ++ List(entity.head), count + 1)
+        if (count % offset == start) readOffset(acc ++ List(entity.head), count + 1)
         else readOffset(acc, count + 1)
       }
     }
@@ -489,10 +493,11 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   /// real logic start here ///////////////////////////////////////////////////////////////////////////////////////////
 
   private var totalFileSize: Long = 0
-  /** for different naming of received file */
-  private var shuffledFileCount: AtomicInteger = new AtomicInteger(0)
+  /** for different naming of received file
+   * these values are atomic because of concurrency issue */
+  private val shuffledFileCount: AtomicInteger = new AtomicInteger(0)
   /** files that will be merged */
-  private var shuffledFilePaths: List[String] = List.empty[String]
+  private val shuffledFilePaths: ConcurrentLinkedQueue[String] = new ConcurrentLinkedQueue[String]
 
   /** collect original given input files */
   private val originalSmallFilePaths : List[String] = {
@@ -511,7 +516,11 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   def getFileSize: Long = totalFileSize
   def getSampleList(offset: Int): List[String] = {
     assert(offset > 0 && totalFileSize / offset < 1000000)
-    useParallelism(sortedSmallFilePaths)(produceSample(_, offset)).flatten[String]
+    val remainder = offset / sortedSmallFilePaths.length
+    useParallelism(sortedSmallFilePaths.zipWithIndex){
+      case (path, index) =>
+        produceSample(path, index * remainder, offset)
+    }.flatten[String]
   }
   def getToWorkerNFilePaths(workerNum: Int, partition: Pivots): List[List[String]] = {
     val partitionFilePaths = useParallelism(sortedSmallFilePaths)(makePartitionedFiles(workerNum, _, partition.pivots.toList))
@@ -520,7 +529,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       toN = partitionFilePaths.flatMap(_(n)).filter(_ != "")
     } yield toN
     deleteDirectory(sortedSmallDirectory)
-    shuffledFilePaths = toN(workerNum)
+    shuffledFilePaths.addAll(java.util.Arrays.asList(toN(workerNum):_*))
     toN
   }
   def mergeWrite(workerNum: Int) : String = {
@@ -538,7 +547,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
         mergeLevel(nextFilePaths)
       }
     }
-    val result = mergeLevel(shuffledFilePaths)
+    val result = mergeLevel(shuffledFilePaths.iterator().toList)
     deleteDirectory(partitionedDirectory)
     deleteDirectory(mergingDirectory)
     result
