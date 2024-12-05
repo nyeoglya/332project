@@ -8,21 +8,22 @@ master_local_folder="$home_folder/validation"
 output_file="$home_folder/validation/merged_file"
 
 set -e
-rm -rf $master_loacl_folder
+rm -r "$master_local_folder" || true
 mkdir -p "$master_local_folder"
 
 for worker in "${workers[@]}"; do
-    echo "> Processing $worker..."
+    echo ">> Processing $worker..."
+
+    ssh "$worker" "find \"$remote_folder\" -name 'headtail_*' -exec rm {} \;"
 
     # valsort & send results
     ssh "$worker" "
-        for FILE in $remote_folder/*; do 
-            ./valsort \"\$FILE\" > \"$home_folder/${worker}_valsort_result.txt\"
+        remote_home=\"$home_folder\"
+        for FILE in $remote_folder/*; do
+            ./valsort \"\$FILE\"
         done
     "
-
-    scp "$worker:$home_folder/${worker}_valsort_result.txt" "$master_local_folder/"
-
+    
     # extract head & tail from files
     ssh "$worker" "
         for FILE in $remote_folder/*; do
@@ -35,17 +36,16 @@ for worker in "${workers[@]}"; do
     # send head & tail to master
     scp "$worker:$remote_folder/headtail_*" "$master_local_folder/"
     
-    echo "> successfully move headtail from $worker."
+    echo " "
 done
 
-# merge files
-find "$master_local_folder" -type f | sort | while read -r FILE; do
-  echo "> merge $master_local_folder..."
-  cat "$FILE" >> "$output_file"
-  echo -e "\n" >> "$output_file" # add \n between files
+> "$output_file"
+for file in $(ls "$master_local_folder" | sort); do
+    if [ -f "$master_local_folder/$file" ]; then
+        cat "$master_local_folder/$file" >> "$output_file"
+    fi
 done
 
-cd $home_folder
-./valsort $output_file > $home_folder/result.txt # final valsort result file
+"$home_folder/valsort" "$output_file" # final valsort result file
 
-echo "Complete work from worker. Results were saved in $master_local_folder."
+echo ">> complete validation."
