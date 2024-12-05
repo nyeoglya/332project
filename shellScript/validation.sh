@@ -1,10 +1,11 @@
 #!/bin/bash
 
 workers=("2.2.2.101" "2.2.2.102" "2.2.2.104" "2.2.2.105" "2.2.2.106" "2.2.2.107" "2.2.2.108" "2.2.2.109" "2.2.2.110" "2.2.2.111")
+name="$1"
 home_folder="/home/green"
-remote_folder="$home_folder/dataset/big_output"
+remote_folder="$home_folder/dataset/${name}_output"
 master_local_folder="$home_folder/validation"
-output_file="$home_folder/validation_merged.txt"
+output_file="$home_folder/validation/merged_file"
 
 set -e
 rm -r "$master_local_folder" || true
