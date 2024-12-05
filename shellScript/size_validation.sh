@@ -6,7 +6,7 @@ name="$1"
 home_folder="/home/green"
 
 remote_input_folder="/home/dataset/${name}"
-remote_output_folder="$home_folder/dataset/big_output"
+remote_output_folder="$home_folder/dataset/${name}_output"
 remote_save_folder="$home_folder/validation/${name}"
 
 master_unsorted_folder="$home_folder/validation/unsorted_data"
