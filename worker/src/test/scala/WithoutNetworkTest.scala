@@ -215,14 +215,14 @@ class WithoutNetworkTest extends FunSuite {
       createFiles(2, 2, 1000, "4000")
       val worker1 = new WorkerLogic(new worker.Config(worker1Arg))
       val originalData = worker1.readFile(worker1.sortedSmallFilePaths.head)
-      val sampleData = worker1.produceSample(worker1.sortedSmallFilePaths.head, 100)
+      val sampleData = worker1.produceSample(worker1.sortedSmallFilePaths.head, 0, 100)
       assert(sampleData.forall(head => originalData.exists(_.head == head)))
     }
 
     test("produceSampleFile test : sorted ") {
       createFiles(2, 2, 1000, "4000")
       val worker1 = new WorkerLogic(new worker.Config(worker1Arg))
-      val sampleData = worker1.produceSample(worker1.sortedSmallFilePaths.head, 100)
+      val sampleData = worker1.produceSample(worker1.sortedSmallFilePaths.head, 0, 100)
       assert(sampleData == sampleData.sorted)
     }
 
@@ -230,7 +230,7 @@ class WithoutNetworkTest extends FunSuite {
       createFiles(2, 2, 1000, "4000")
       val worker1 = new WorkerLogic(new worker.Config(worker1Arg))
       val originalData = worker1.readFile(worker1.sortedSmallFilePaths.head)
-      val sampleData = worker1.produceSample(worker1.sortedSmallFilePaths.head, 100)
+      val sampleData = worker1.produceSample(worker1.sortedSmallFilePaths.head, 0, 100)
       assert(sampleData.length == (originalData.length + 100 - 1) / 100)
     }
 
