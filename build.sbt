@@ -62,6 +62,7 @@ lazy val common = (project in file("common"))
 lazy val worker = (project in file("worker"))
   .settings(
     name := "worker",
+    logLevel := Level.Debug,
     libraryDependencies ++= commonDependencies ++ workerDependencies,
     libraryDependencies ++= Seq(
       "io.grpc" % "grpc-netty" % grpcVersion
@@ -84,6 +85,7 @@ lazy val worker = (project in file("worker"))
 lazy val master = (project in file("master"))
   .settings(
     name := "master",
+    logLevel := Level.Debug,
     libraryDependencies ++= commonDependencies ++ masterDependencies,
     libraryDependencies ++= Seq(
       "io.grpc" % "grpc-netty" % grpcVersion
