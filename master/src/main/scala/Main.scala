@@ -30,6 +30,8 @@ import java.lang
 import proto.common.ShuffleResponse
 import proto.common.MergeResponse
 import proto.common.MergeRequest
+import zio.logging.LogFormat
+import zio.logging.backend.SLF4J
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val workerNum = trailArg[Int](required = true, descr = "Number of workers", default = Some(1))
@@ -39,8 +41,13 @@ class Config(args: Seq[String]) extends ScallopConf(args) {
 object Main extends ZIOAppDefault {
   def port: Int = 50050
 
+  val loggerFormat = LogFormat.timestamp.fixed(32) |-| LogFormat.line
+
+  override val bootstrap: ZLayer[Any, Nothing, Unit] = 
+    Runtime.removeDefaultLoggers ++ SLF4J.slf4j(loggerFormat)
+
   override def run: ZIO[Environment with ZIOAppArgs with Scope,Any,Any] = (for {
-    _ <- zio.Console.printLine(s"Master is running on port ${port}")
+    _ <- ZIO.logInfo(s"Master is running on port ${port}")
     result <- serverLive.launch
   } yield result).provideSomeLayer[ZIOAppArgs](
     ZLayer.fromZIO( for {
@@ -123,38 +130,38 @@ class MasterLogic(config: Config) {
     * @param clientAddress address of client
     */
   def addClient(workerPort: Int, workerSize: Long): IO[Throwable, Any] = {
-    assert { !workerIpQueue.isEmpty }
-    if (clients.size >= config.workerNum.toOption.get) {
-      println(s"Worker attached but rejected")
-      ZIO.fail(new StatusException(Status.UNAVAILABLE))
-    } else {
-      val workerIp :: others = workerIpQueue
-      workerIpQueue = others
-      println(s"New worker[${clients.size}] attached: ${workerIp}:${workerPort}, Size: ${workerSize} Bytes")
-      clients = clients :+ WorkerClient(WorkerServiceClient.live(
-        ZManagedChannel(
-          ManagedChannelBuilder.forAddress(workerIp, workerPort).usePlaintext()
-        )
-      ), workerSize)
-
-      workerIpList = workerIpList :+ Address(workerIp, workerPort)
-
-      if (clients.size == config.workerNum.toOption.get) this.run()
-      else ZIO.succeed(())
+      if (clients.size >= config.workerNum.toOption.get) {
+        for {
+          _ <- ZIO.logWarning(s"Worker attached but rejected")
+          result <- ZIO.fail(new StatusException(Status.UNAVAILABLE))
+        } yield result
+      } else {
+        val workerIp :: others = workerIpQueue
+        workerIpQueue = others
+        clients = clients :+ WorkerClient(WorkerServiceClient.live(
+          ZManagedChannel(
+            ManagedChannelBuilder.forAddress(workerIp, workerPort).usePlaintext()
+          )
+        ), workerSize)
+        workerIpList = workerIpList :+ Address(workerIp, workerPort)
+        for {
+          _ <- ZIO.logInfo(s"New worker[${clients.size}] attached: ${workerIp}:${workerPort}, Size: ${workerSize} Bytes")
+          result <- if (clients.size == config.workerNum.toOption.get) 
+            this.run() else ZIO.succeed(())
+        } yield result
+      }
     }
-  }
 
   def run(): IO[Throwable, Any] = {
-    println("All worker connected")
-
     for {
-      _ <- zio.Console.printLine("Requests samples to each workers")
+      _ <- ZIO.logInfo("All worker connected")
+      _ <- ZIO.logInfo("Requests samples to each workers")
       pivotCandicateList <- ZIO.foreachPar(clients.map(_.client)) { layer =>
         collectSample.provideLayer(layer)
       }
       selectedPivots = selectPivots(pivotCandicateList)
-      _ <- zio.Console.printLine(selectedPivots.pivots)
-      _ <- zio.Console.printLine("Requests shuffle to each workers")
+      _ <- ZIO.logDebug(selectedPivots.pivots.mkString(","))
+      _ <- ZIO.logInfo("Requests shuffle to each workers")
       result <- ZIO.foreachPar(clients.map(_.client).zipWithIndex) { 
         case (layer, index) => 
           sendPartition(index, selectedPivots).provideLayer(layer)
@@ -164,7 +171,7 @@ class MasterLogic(config: Config) {
           new RuntimeException("SENDPARTITION")
         }
       }}
-      _ <- zio.Console.printLine("Shffule request complete.")
+      _ <- ZIO.logInfo("Shffule request complete.")
       result <- ZIO.foreachPar(clients.map(_.client).zipWithIndex) { 
         case (layer, index) => 
           requestMerge().provideLayer(layer)
@@ -174,7 +181,7 @@ class MasterLogic(config: Config) {
           new RuntimeException("REQUESTMERGE")
         }
       }}
-      _ <- zio.Console.printLine("Merge request complete.")
+      _ <- ZIO.logInfo("Merge request complete.")
     } yield result
   }.catchAllCause { cause => {
     ZIO.fail {
