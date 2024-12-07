@@ -72,7 +72,7 @@ object Main extends ZIOAppDefault {
               ZIO.logInfo(s"Input Directories: ${dirs.mkString(", ")}")
             }
             _ <- ZIO.foreach(config.outputDirectory.toOption){ dir => 
-              ZIO.logInfo(s"Input Directories: ${dir}")
+              ZIO.logInfo(s"Output Directory: ${dir}")
             }
             _ = (port = {config.port.toOption.get})
           } yield config
