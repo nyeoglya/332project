@@ -58,6 +58,7 @@ After master run properly, run ``activate_test`` with **[test_name]** (small, bi
 ```
 
 According to the above method, the output is stored in the ``/home/green/dataset/[test_name]_output``.
+When master print "Merge request complete", the whole sorting progress done. Just ``Ctrl+C`` to close the entire program(master & workers).
 
 To arbitrarily specify the input and output folder paths, you can run ``worker`` for "each" worker. You must use absolute path for each parameters.
 ```sh
