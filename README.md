@@ -29,6 +29,8 @@
 **Week 8 (Project Deadline): Preparing for Final Presentation** [Presentation Slides](https://github.com/nyeoglya/332project/blob/main/presentation/final/) / [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week8_report.html)
 
 ## How to use
+You MUST login into account green.
+
 ### 1. master setting
 Download ``332project`` repository by git clone. Also, download ``JDK 21``, ``master.jar``, ``worker.jar`` from github repository release.
 ```shell
@@ -53,6 +55,13 @@ Open two windows on master. Then, run ``master`` first with worker numbers.
 After master run properly, run ``activate_test`` with **[test_name]** (small, big, large).
 ```sh
 ./332project/shellScript/activate_test.sh [test_name]
+```
+
+According to the above method, the output is stored in the ``/home/green/dataset/[test_name]_output``.
+
+To arbitrarily specify the input and output folder paths, you can run ``worker`` for "each" worker.
+```sh
+./worker [master_ip:port] -I [input_directories] -O [output_directories]
 ```
 
 ### 4. validation
