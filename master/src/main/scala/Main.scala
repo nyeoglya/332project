@@ -106,7 +106,7 @@ class MasterLogic(config: Config) {
   var workerIpList: List[Address] = List()
   var clients: List[WorkerClient] = List()
 
-  lazy val offset: Int = List(1, (clients.map(_.size).sum / (1024 * 1024)).toInt).max
+  lazy val offset: Int = List(1, 1 + (clients.map(_.size).sum / 1000000).toInt).max
 
   // intercepts worker ip from grpc request
   class WorkerIpInterceptor extends ServerInterceptor {

@@ -14,7 +14,7 @@
 ## Plan
 **Week 1: Planning** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week1_report.html)
 
-**Week 2 (Midterm week): Design ideas** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week2_report.html) / [Discussion1](https://github.com/nyeoglya/332project/discussions/3) [Discussion2](https://github.com/nyeoglya/332project/discussions/4) / [Test Code](https://github.com/nyeoglya/grpc-master-worker)
+**Week 2 (Midterm week): Design ideas** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week2_report.html) / [Discussion1](https://github.com/nyeoglya/332project/discussions/3) [Discussion2](https://github.com/nyeoglya/332project/discussions/4) (Discussion removed accidently when cleaning github history) / [Test Code](https://github.com/nyeoglya/grpc-master-worker)
 
 **Week 3: Overall project design** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week3_report.html) / [Comment1](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11133877) [Comment2](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11133893) [Comment3](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11133896) [Comment4](https://github.com/nyeoglya/332project/discussions/3#discussioncomment-11134228)
 
@@ -27,6 +27,49 @@
 **Week 7: Project Improvement and Maintenance** [Report](https://htmlpreview.github.io/?https://github.com/nyeoglya/332project/blob/main/report/week7_report.html)
 
 **Week 8 (Project Deadline): Preparing for Final Presentation**
+
+## How to use
+### 1. master setting
+Download ``332project`` repository by git clone. Also, download ``JDK 22``, ``master.jar``, ``worker.jar`` from github repository release.
+```shell
+git clone https://github.com/nyeoglya/332project.git
+wget https://github.com/nyeoglya/332project/releases/download/release/master.jar
+wget https://github.com/nyeoglya/332project/releases/download/release/worker.jar
+wget https://github.com/nyeoglya/332project/releases/download/release/jdk.tar
+```
+
+### 2. initiate
+Initiate project using ``initiate``.
+```sh
+./332project/shellScript/initiate.sh
+```
+
+### 3. run program
+Open two windows on master. Then, run ``master`` first with worker numbers.
+```sh
+./master [worker_num]
+```
+
+After master run properly, run ``activate_test`` with **[test_name]** (small, big, large).
+```sh
+./332project/shellScript/activate_test.sh [test_name]
+```
+
+### 4. validation
+After all sort process ends, run ``validation``, ``size_validation`` to validate whether the sorting process complete or not. Both two shell need **[test_name]**.
+```sh
+./332project/shellScript/validate.sh [test_name]
+./332project/shellScript/size_validate.sh [test_name]
+```
+
+<!--
+### 5. test
+For any additional test, first run ``transfer_test`` to make a test dataset. It needs **[test_name]** (small, big, large).
+```sh
+./332project/shellScript/transfer_test.sh [test_name]
+./332project/shellScript/activate_manyDirTest.sh
+```
+-->
 
 ## Grading Criteria
 ```md

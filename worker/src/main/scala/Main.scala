@@ -265,19 +265,13 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
   /** provide dual mode(window & linux) */
   private val windowMode = false
 
-  private def osPath(path: String): String = if(windowMode) path.replaceAll("/", "\\\\") else path.replaceAll("\\\\", "/")
-
   private def createDirectory(originalPath: String, name: String): String = {
     val path = originalPath.substring(0, originalPath.lastIndexOf('/')) + "/" + name
-    if(windowMode) ("cmd /c mkdir " + osPath(path)).!!
-    else ("mkdir -p " + osPath(path)).!!
+    Files.createDirectories(Paths.get(path))
     path
   }
 
-  private def deleteDirectory(path: String): Unit = {
-    if(windowMode) ("cmd /c rmdir /s /q " + osPath(path)).!!
-    else ("rm -rf " + osPath(path)).!!
-  }
+  private def deleteDirectory(path: String): Unit = Files.walk(Paths.get(path)).sorted(java.util.Comparator.reverseOrder()).forEach(Files.delete)
 
   /// create intermediate directories /////////////////////////////////////////////////////////////////////////////////
   private val sortedSmallDirectory = createDirectory(config.outputDirectory.toOption.get, "sortedSmall")
@@ -524,7 +518,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
 
   def getFileSize: Long = totalFileSize
   def getSampleList(offset: Int): List[String] = {
-    assert(offset > 0 && totalFileSize / offset < 1000000)
+    assert(offset > 0 && totalFileSize / offset <= 1000000)
     val remainder = offset / sortedSmallFilePaths.length
     useParallelism(sortedSmallFilePaths.zipWithIndex){
       case (path, index) =>
@@ -537,7 +531,7 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       n <- (0 to partition.pivots.length).toList
       toN = partitionFilePaths.flatMap(_(n)).filter(_ != "")
     } yield toN
-    deleteDirectory(sortedSmallDirectory)
+
     shuffledFilePaths.addAll(java.util.Arrays.asList(toN(workerNum):_*))
     toN
   }
@@ -557,8 +551,11 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
       }
     }
     val result = mergeLevel(shuffledFilePaths.iterator().toList)
+    
+    deleteDirectory(sortedSmallDirectory)
     deleteDirectory(partitionedDirectory)
     deleteDirectory(mergingDirectory)
+    
     result
   }
 }
