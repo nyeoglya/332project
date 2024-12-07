@@ -41,7 +41,7 @@ class Config(args: Seq[String]) extends ScallopConf(args) {
 object Main extends ZIOAppDefault {
   def port: Int = 50050
 
-  val loggerFormat = LogFormat.line
+  val loggerFormat = LogFormat.timestamp.fixed(32) |-| LogFormat.line
 
   override val bootstrap: ZLayer[Any, Nothing, Unit] = 
     Runtime.removeDefaultLoggers ++ SLF4J.slf4j(loggerFormat)
