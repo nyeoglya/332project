@@ -68,6 +68,12 @@ object Main extends ZIOAppDefault {
             args <- getArgs
             config = new Config(args)
             _ <- ZIO.logInfo(s" Master Address: ${config.masterAddress.toOption.get}")
+            _ <- ZIO.foreach(config.inputDirectories.toOption){ dirs => 
+              ZIO.logInfo(s"Input Directories: ${dirs.mkString(", ")}")
+            }
+            _ <- ZIO.foreach(config.outputDirectory.toOption){ dir => 
+              ZIO.logInfo(s"Input Directories: ${dir}")
+            }
             _ = (port = {config.port.toOption.get})
           } yield config
         ) 
@@ -553,6 +559,4 @@ class WorkerLogic(config: Config) extends WorkerServiceLogic {
     result
   }
 }
-
-
 
