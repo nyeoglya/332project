@@ -1,5 +1,0 @@
-#!/bin/bash
-
-path="/home/green/"
-
-$path/jdk-11/bin/java -jar worker.jar $*

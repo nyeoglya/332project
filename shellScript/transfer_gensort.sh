@@ -4,6 +4,15 @@ workers=("2.2.2.101" "2.2.2.102" "2.2.2.104" "2.2.2.105" "2.2.2.106" "2.2.2.107"
 
 file_path="/home/green/332project/shellScript/gensort-linux-1.5.tar.gz"
 worker_path="/home/green/gensort_source"
+master_path="/home/green/gensort_source"
+
+cd /home/green
+mkdir -p $master_path
+cp $file_path $master_path/
+cd $master_path
+tar -xzf gensort-linux-1.5.tar.gz
+mv $master_path/64/valsort /home/green/
+rm -rf $master_path
 
 for worker in "${workers[@]}"; do
 	ssh green@$worker "mkdir -p $worker_path"

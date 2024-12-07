@@ -17,3 +17,4 @@ for worker in "${workers[@]}"; do
 done
 
 echo "Activate master & 10 workers"
+

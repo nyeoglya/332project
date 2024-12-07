@@ -1,7 +1,0 @@
-#!/bin/bash
-
-worker_num="$1"
-
-path="/home/green"
-
-$path/jdk-11/bin/java -jar master.jar $worker_num

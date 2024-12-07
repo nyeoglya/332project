@@ -1,5 +1,5 @@
 #!/bin/bash
 
-path="/home/green/332project"
+path="/home/green/"
 
-$path/jdk/bin/java -jar worker.jar $*
+$path/jdk-11/bin/java -jar worker.jar $*

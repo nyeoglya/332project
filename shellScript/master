@@ -2,6 +2,6 @@
 
 worker_num="$1"
 
-path="/home/green/332project"
+path="/home/green"
 
-$path/jdk/bin/java -jar master.jar $worker_num
+$path/jdk-11/bin/java -jar master.jar $worker_num
