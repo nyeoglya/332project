@@ -34,6 +34,8 @@ import java.util
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.ConcurrentLinkedQueue
 import scala.collection.convert.ImplicitConversions.`iterator asScala`
+import zio.logging.LogFormat
+import zio.logging.backend.SLF4J
 
 class Config(args: Seq[String]) extends ScallopConf(args) {
   val masterAddress = trailArg[String](required = true, descr = "Mater address (e.g. 192.168.0.1:8000)", default = Some("127.0.0.1"))
@@ -46,10 +48,15 @@ class Config(args: Seq[String]) extends ScallopConf(args) {
 object Main extends ZIOAppDefault {
   var port = 50051
 
+  val loggerFormat = LogFormat.line
+
+  override val bootstrap: ZLayer[Any, Nothing, Unit] = 
+    Runtime.removeDefaultLoggers ++ SLF4J.slf4j(loggerFormat)
+
   def run: ZIO[Environment with ZIOAppArgs with Scope,Any,Any] = { 
     (for {
       result <- serverLive.launch.exitCode.fork
-      _ <- zio.Console.printLine(s"Worker is running on port ${port}. Press Ctrl-C to stop.")
+      _ <- ZIO.logInfo(s"Worker is running on port ${port}. Press Ctrl-C to stop.")
       _ <- sendDataToMaster.mapError(e => {
         println("Error while send data to master")
       })
@@ -60,9 +67,7 @@ object Main extends ZIOAppDefault {
           for {
             args <- getArgs
             config = new Config(args)
-            _ <- zio.Console.printLine(s" Master Address: ${config.masterAddress.toOption.get}")
-            _ = config.inputDirectories.toOption.foreach(dirs => println(s"Input Directories: ${dirs.mkString(", ")}"))
-            _ = config.outputDirectory.toOption.foreach(dir => println(s"Output Directory: $dir"))
+            _ <- ZIO.logInfo(s" Master Address: ${config.masterAddress.toOption.get}")
             _ = (port = {config.port.toOption.get})
           } yield config
         ) 
@@ -100,13 +105,11 @@ object Main extends ZIOAppDefault {
 
   class ServiceImpl(service: WorkerServiceLogic) extends WorkerService {
     def getSamples(request: SampleRequest): IO[StatusException,Pivots] = {
-      val result = for {
-        _ <- zio.Console.printLine(s"Sample requested with offset: ${request.offset}")
+      for {
+        _ <- ZIO.logInfo(s"Sample requested with offset: ${request.offset}")
         samples = service.getSampleList(request.offset.toInt)
         result = Pivots(samples)
       } yield result
-
-      result.mapError(e => new StatusException(Status.INTERNAL))
     }.catchAllCause { cause =>
       ZIO.fail {
         println(s"Get samples error cause : $cause")
@@ -115,20 +118,16 @@ object Main extends ZIOAppDefault {
     }
 
     def startShuffle(request: ShuffleRequest): IO[StatusException,ShuffleResponse] = {
-      println(s"StartShuffle with index ${request.workerNumber} requested")
       service.workerNumber = request.workerNumber
-      println("Worker addresses:")
-      request.workerAddresses.foreach(println)
       service.totalWorker = request.workerAddresses.size
       val pivots = request.pivots.get
-      println(s"Partition: ${pivots.pivots}")
-
       val files = service.getToWorkerNFilePaths(request.workerNumber, pivots)
 
       val result = for {
+        _ <- ZIO.logInfo(s"StartShuffle with index ${service.workerNumber} requested")
+        _ <- ZIO.logInfo(s"Partition: ${pivots.pivots}")
         result <- ZIO.foreach(files.zipWithIndex)({case (fileList, index) => {
           if (index != request.workerNumber) {
-            println(s"Connect to: worker[${index}]")
             val layer = WorkerServiceClient.live(
                 zio_grpc.ZManagedChannel(
                   ManagedChannelBuilder.forAddress(
@@ -141,14 +140,14 @@ object Main extends ZIOAppDefault {
               println(s"Error while connecting worker[${index}]")
               println(e)
             })
-            println(s"Connected to : worker[${index}]")
             for {
+              _ <- ZIO.logInfo(s"Connected to : worker[${index}]")
               result <- ZIO.foreach(fileList.zipWithIndex)(
               { case (filePath, index) => 
                 {
                   val file = service.readFile(filePath)
-                  println(s"Send File[${index}]")
                   for {
+                    _ <- ZIO.logDebug(s"Send File[${index}]")
                     result <- sendDataToWorker(
                       request.workerNumber,
                       index != (fileList.size - 1),
@@ -180,9 +179,11 @@ object Main extends ZIOAppDefault {
 
 
     def sendData(request: DataRequest): IO[StatusException,DataResponse] = {
-      println(s"Get data fregment from worker[${request.workerNumber}]")
-      service.writeNetworkFile(request.payload.toList)
-      ZIO.succeed(DataResponse())
+      for {
+        _ <- ZIO.logDebug(s"Get data fregment from worker[${request.workerNumber}]")
+        _ = service.writeNetworkFile(request.payload.toList)
+        result <- ZIO.succeed(DataResponse())
+      } yield result
     }.catchAllCause { cause => 
       ZIO.succeed {
         println(s"Send data Error cause: $cause")
@@ -191,10 +192,12 @@ object Main extends ZIOAppDefault {
     }
 
     def startMerge(request: MergeRequest): IO[StatusException,MergeResponse] = {
-      println(s"Start merging files")
-      service.mergeWrite(service.workerNumber)
-      println(s"Complete Sorting")
-      ZIO.succeed(MergeResponse())
+      for {
+        _ <- ZIO.logInfo(s"Start merging files")
+        _ = service.mergeWrite(service.workerNumber)
+        _ <- ZIO.logInfo(s"Complete Sorting")
+        result <- ZIO.succeed(MergeResponse())
+      } yield result
     }
   }
 }
