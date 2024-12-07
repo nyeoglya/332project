@@ -59,9 +59,9 @@ After master run properly, run ``activate_test`` with **[test_name]** (small, bi
 
 According to the above method, the output is stored in the ``/home/green/dataset/[test_name]_output``.
 
-To arbitrarily specify the input and output folder paths, you can run ``worker`` for "each" worker.
+To arbitrarily specify the input and output folder paths, you can run ``worker`` for "each" worker. You must use absolute path for each parameters.
 ```sh
-./worker [master_ip:port] -I [input_directories] -O [output_directories]
+./worker [master_ip:port] -I [input_directories] -O [output_directory]
 ```
 
 ### 4. validation
