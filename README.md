@@ -68,8 +68,8 @@ To arbitrarily specify the input and output folder paths, you can run ``worker``
 ### 4. validation
 After all sort process ends, run ``validation``, ``size_validation`` to validate whether the sorting process complete or not. Both two shell need **[test_name]**.
 ```sh
-./332project/shellScript/validate.sh [test_name]
-./332project/shellScript/size_validate.sh [test_name]
+./332project/shellScript/validation.sh [test_name]
+./332project/shellScript/size_validation.sh [test_name]
 ```
 
 ### 5. multi-input cases
